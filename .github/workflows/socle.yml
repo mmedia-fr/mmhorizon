@@ -1,0 +1,320 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# MMhorizon (Rust / Qt 6) — fabrication continue : Windows, Linux, Android, et macOS
+# par portabilité. Structure reprise de MMdedit (même socle).
+#
+# Le noyau de calcul s'éprouve seul (tests, outil en ligne de commande, contrôle
+# sur panorama de synthèse) ; l'application s'éprouve sur le paquet, et non sur le
+# seul binaire de construction : c'est le paquet qui part aux postes.
+name: socle
+
+on:
+  push:
+    branches: [main, "socle/**"]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  QT_VERSION: "6.8.3"
+  CARGO_TERM_COLOR: always
+
+jobs:
+  noyau:
+    name: noyau-${{ matrix.nom }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { nom: linux-x86_64,   os: ubuntu-22.04, exe: mmhorizon-calcul }
+          - { nom: windows-x86_64, os: windows-2022, exe: mmhorizon-calcul.exe }
+          - { nom: macos-arm64,    os: macos-14,     exe: mmhorizon-calcul }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: noyau
+          key: ${{ matrix.os }}
+      - name: Tests du noyau
+        run: cargo test --manifest-path noyau/Cargo.toml --locked
+      - name: Outil en ligne de commande
+        run: cargo build --manifest-path noyau/Cargo.toml --release --locked --bin mmhorizon-calcul
+      - name: Contrôle de l'outil
+        shell: bash
+        run: |
+          set -euo pipefail
+          outil="noyau/target/release/${{ matrix.exe }}"
+          "$outil" --controle
+          # Nom accentué : les arguments ne doivent rien perdre, sous Windows compris.
+          "$outil" --synthese "Panorama été.png"
+          "$outil" "Panorama été.png" --nord 0 --nom "Synthèse" --exports exports --apercu apercu.png
+          test -s "Panorama été.horizon.json"
+          test -s exports/astromosaic.json
+          test -s exports/horizon.hrz
+          ls exports/stellarium-*.zip
+      - name: Dépôt de l'outil
+        uses: actions/upload-artifact@v4
+        with:
+          name: mmhorizon-calcul-${{ matrix.nom }}
+          path: noyau/target/release/${{ matrix.exe }}
+          if-no-files-found: error
+
+  bureau:
+    name: ${{ matrix.nom }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # L'AppImage ne tourne que sur une glibc au moins aussi récente que celle
+          # de sa fabrication : ubuntu-22.04 (glibc 2.35) couvre Debian 12 (MMdedit 0.4.2).
+          - { nom: linux,   os: ubuntu-22.04 }
+          - { nom: windows, os: windows-2022 }
+          - { nom: macos,   os: macos-14 }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            core -> ../_build/cargo
+            noyau
+          # La clé par défaut ne distingue pas les versions d'Ubuntu.
+          key: ${{ matrix.os }}
+      # Avant l'environnement MSVC : sous Git Bash, il fait passer le « link » de
+      # Git (/usr/bin/link) devant link.exe, et rustc échoue à l'édition de liens
+      # (« /usr/bin/link: extra operand »). Sans lui, rustc trouve MSVC seul.
+      - name: Panorama d'essai
+        shell: bash
+        run: cargo run --manifest-path noyau/Cargo.toml --release --locked --bin mmhorizon-calcul -- --synthese "Panorama été.png"
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          modules: ""
+          cache: true
+      - name: Dépendances Linux
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libgl1-mesa-dev libxkbcommon-dev ninja-build
+      - name: MSVC
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+      - name: Configuration
+        run: cmake -S . -B _build -G Ninja -DCMAKE_BUILD_TYPE=Release
+        shell: bash
+        env:
+          CMAKE_MAKE_PROGRAM: ninja
+      - name: Construction
+        run: cmake --build _build --config Release
+      - name: Test de fumée
+        run: ctest --test-dir _build --output-on-failure -C Release
+        env:
+          QT_QPA_PLATFORM: offscreen
+
+      # ---- Windows : l'installeur ------------------------------------------
+      - name: Paquet Windows
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=$(sed -n 's/^project(mmhorizon VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt)
+          test -n "$version"
+          mkdir -p dist/MMhorizon
+          cp _build/mmhorizon.exe dist/MMhorizon/MMhorizon.exe
+          "$QT_ROOT_DIR/bin/windeployqt.exe" --release --qmldir core/qml dist/MMhorizon/MMhorizon.exe
+          # Runtime Visual C++ déposé à côté de l'exécutable : installation sans
+          # élévation (relevé sur MMdedit 0.4.3).
+          rm -f dist/MMhorizon/vc_redist*.exe
+          crt=$(ls -d "$(cygpath -u "$VCToolsRedistDir")"x64/Microsoft.VC14*.CRT | head -1)
+          test -d "$crt"
+          cp "$crt"/*.dll dist/MMhorizon/
+          for dll in vcruntime140.dll vcruntime140_1.dll msvcp140.dll; do test -f "dist/MMhorizon/$dll"; done
+          # Plateforme offscreen : sans elle, rien ne se contrôle sans session ouverte.
+          cp "$QT_ROOT_DIR/plugins/platforms/qoffscreen.dll" dist/MMhorizon/platforms/
+          iscc="/c/Program Files (x86)/Inno Setup 6/ISCC.exe"
+          test -f "$iscc"
+          # Double barre : sous Git Bash, « /DAppVersion=… » serait converti en chemin.
+          "$iscc" "//DAppVersion=$version" build/mmhorizon.iss
+          test -f "dist/MMhorizon-$version-setup.exe"
+      - name: Contrôle du paquet Windows — chemin absolu accentué
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $nom = Join-Path $PWD ("Panorama " + [char]0xE9 + "t" + [char]0xE9 + ".png")
+          if (-not (Test-Path $nom)) { throw "panorama d'essai absent : $nom" }
+          $env:QT_QPA_PLATFORM = "offscreen"
+          # Start-Process : PowerShell ne renseigne pas $LASTEXITCODE pour une
+          # application graphique ; le chemin est cité, Start-Process ne le fait pas.
+          $p = Start-Process -FilePath ".\dist\MMhorizon\MMhorizon.exe" `
+            -ArgumentList "--smoke", ('"' + $nom + '"') -Wait -PassThru -NoNewWindow
+          if ($p.ExitCode -ne 0) { throw "contrôle en échec : code $($p.ExitCode)" }
+      - name: Contrôle Windows — installation par l'installeur
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $setup = Get-ChildItem dist\MMhorizon-*-setup.exe | Select-Object -First 1
+          $dir = "$env:RUNNER_TEMP\MMhorizonInstalle"
+          $p = Start-Process -FilePath $setup.FullName -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/CURRENTUSER", "/DIR=`"$dir`"" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "installation en échec : code $($p.ExitCode)" }
+          foreach ($dll in "vcruntime140.dll", "vcruntime140_1.dll", "msvcp140.dll") {
+            if (-not (Test-Path "$dir\$dll")) { throw "runtime Visual C++ absent de l'installé : $dll" }
+          }
+          $nom = Join-Path $PWD ("Panorama " + [char]0xE9 + "t" + [char]0xE9 + ".png")
+          $env:QT_QPA_PLATFORM = "offscreen"
+          $q = Start-Process -FilePath "$dir\MMhorizon.exe" -ArgumentList "--smoke", ('"' + $nom + '"') -Wait -PassThru -NoNewWindow
+          if ($q.ExitCode -ne 0) { throw "fumée de l'installé en échec : code $($q.ExitCode)" }
+      - name: Dépôt de l'installeur Windows
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: mmhorizon-windows-setup
+          path: dist/*-setup.exe
+          if-no-files-found: error
+
+      # ---- Linux : AppImage ------------------------------------------------
+      - name: Paquet Linux
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=$(sed -n 's/^project(mmhorizon VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt)
+          cmake --install _build --prefix AppDir/usr
+          install -Dm644 packaging/mmhorizon.desktop AppDir/usr/share/applications/mmhorizon.desktop
+          install -Dm644 assets/mmhorizon.png AppDir/usr/share/icons/hicolor/256x256/apps/mmhorizon.png
+          base=https://github.com/linuxdeploy
+          curl -sSL -o linuxdeploy.AppImage \
+            "$base/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage"
+          curl -sSL -o linuxdeploy-plugin-qt.AppImage \
+            "$base/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage"
+          chmod +x linuxdeploy.AppImage linuxdeploy-plugin-qt.AppImage
+          export APPIMAGE_EXTRACT_AND_RUN=1
+          export QML_SOURCES_PATHS=core/qml
+          export EXTRA_PLATFORM_PLUGINS=libqoffscreen.so
+          export OUTPUT="MMhorizon-$version-x86_64.AppImage"
+          ./linuxdeploy.AppImage --appdir AppDir --plugin qt --output appimage
+          test -f "$OUTPUT"
+          mkdir -p dist && mv "$OUTPUT" dist/
+      - name: Contrôle du paquet Linux
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          export APPIMAGE_EXTRACT_AND_RUN=1
+          # Sans les chemins du Qt de construction : c'est le paquet seul qui doit
+          # tenir debout (relevé sur MMdedit 0.4.2).
+          env -u QT_PLUGIN_PATH -u QML2_IMPORT_PATH -u LD_LIBRARY_PATH \
+            QT_QPA_PLATFORM=offscreen ./dist/MMhorizon-*-x86_64.AppImage --smoke "Panorama été.png"
+      - name: Dépôt de l'AppImage
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: mmhorizon-linux-appimage
+          path: dist/*.AppImage
+          if-no-files-found: error
+
+      # ---- macOS : bundle et image disque (non notarisée) -------------------
+      - name: Paquet macOS
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=$(sed -n 's/^project(mmhorizon VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt)
+          mkdir -p dist
+          cp -R _build/mmhorizon.app dist/MMhorizon.app
+          "$QT_ROOT_DIR/bin/macdeployqt" dist/MMhorizon.app -qmldir=core/qml
+          codesign --force --deep --sign - dist/MMhorizon.app
+          hdiutil create -volname "MMhorizon $version" -srcfolder dist/MMhorizon.app \
+            -ov -format UDZO "dist/MMhorizon-$version.dmg"
+          test -f "dist/MMhorizon-$version.dmg"
+      - name: Contrôle du paquet macOS
+        if: runner.os == 'macOS'
+        shell: bash
+        run: QT_QPA_PLATFORM=offscreen ./dist/MMhorizon.app/Contents/MacOS/mmhorizon --smoke "Panorama été.png"
+      - name: Dépôt de l'image disque macOS
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: mmhorizon-macos-dmg
+          path: dist/*.dmg
+          if-no-files-found: error
+
+  android:
+    name: android-${{ matrix.abi }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # arm64 est le livrable ; x86_64 n'existe que pour l'émulateur.
+          - abi: arm64_v8a
+            cible: aarch64-linux-android
+            variable: CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER
+            emulateur: false
+          - abi: x86_64
+            cible: x86_64-linux-android
+            variable: CARGO_TARGET_X86_64_LINUX_ANDROID_LINKER
+            emulateur: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.cible }}
+      - name: Qt hôte (bureau Linux)
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          cache: true
+      - name: Mémorisation du Qt hôte
+        shell: bash
+        run: echo "QT_HOST_DIR=$QT_ROOT_DIR" >> "$GITHUB_ENV"
+      - name: Qt Android
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ env.QT_VERSION }}
+          host: all_os
+          target: android
+          arch: android_${{ matrix.abi }}
+          cache: true
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Configuration
+        shell: bash
+        run: |
+          NDK="$ANDROID_SDK_ROOT/ndk/26.3.11579264"
+          [ -d "$NDK" ] || { yes || true; } | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" "ndk;26.3.11579264" > /dev/null
+          test -d "$NDK"
+          maillon="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/${{ matrix.cible }}26-clang"
+          test -x "$maillon"
+          echo "${{ matrix.variable }}=$maillon" >> "$GITHUB_ENV"
+          export ${{ matrix.variable }}="$maillon"
+          "$QT_ROOT_DIR/bin/qt-cmake" -S . -B _build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DANDROID_SDK_ROOT="$ANDROID_SDK_ROOT" -DANDROID_NDK_ROOT="$NDK" \
+            -DQT_HOST_PATH="$QT_HOST_DIR"
+      - name: Construction APK
+        run: cmake --build _build --target apk
+      - name: Lancement sur émulateur
+        if: matrix.emulateur
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          arch: x86_64
+          target: default
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
+          disable-animations: true
+          # Une seule ligne : l'action exécute chaque ligne dans un shell distinct.
+          script: bash packaging/essai-android.sh
+      - name: Journal de l'émulateur
+        if: matrix.emulateur && failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mmhorizon-android-logcat
+          path: logcat.txt
+          if-no-files-found: ignore
+      - name: Dépôt de l'APK
+        if: matrix.abi == 'arm64_v8a'
+        uses: actions/upload-artifact@v4
+        with:
+          name: mmhorizon-android-arm64
+          path: _build/android-build/build/outputs/apk/**/*.apk
+          if-no-files-found: error

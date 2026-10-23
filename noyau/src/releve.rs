@@ -1,0 +1,327 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+//! Relevé : une photo, sa géométrie, la limite détectée, et le profil qui en découle.
+
+use crate::detection::{self, ImageAnalyse};
+use crate::geometrie::{Geometrie, Projection};
+use crate::metadonnees::{self, Metadonnees};
+use image::{imageops, Rgb, RgbImage};
+use sha2::{Digest, Sha256};
+
+/// Largeur de travail de la détection : 3 600 colonnes, soit 0,1° par colonne
+/// sur un tour complet. Au-delà, le gain de précision est sans objet devant la
+/// parallaxe du support (de l'ordre du demi-degré).
+pub const LARGEUR_ANALYSE: u32 = 3600;
+
+/// Profil par degré d'azimut vrai.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Profil {
+    /// Hauteur au-dessus de laquelle le ciel est dégagé ; `None` hors couverture.
+    pub hauteur_min: Vec<Option<f64>>,
+    /// Secteurs où l'obstacle dépasse le haut de l'image.
+    pub au_dela_du_champ: Vec<u16>,
+}
+
+/// Comment la largeur de 360° a été établie.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Couverture {
+    /// Métadonnées GPano de la photo.
+    GPano,
+    /// Recouvrement détecté entre la fin et le début du panorama.
+    Chevauchement,
+    /// Faute de mieux, la photo est tenue pour un tour exact.
+    Supposee,
+}
+
+impl Couverture {
+    pub fn nom(self) -> &'static str {
+        match self {
+            Self::GPano => "gpano",
+            Self::Chevauchement => "chevauchement",
+            Self::Supposee => "supposee",
+        }
+    }
+}
+
+pub struct Releve {
+    pub nom_photo: String,
+    pub sha256: String,
+    pub largeur: u32,
+    pub hauteur: u32,
+    pub metadonnees: Metadonnees,
+    pub geometrie: Geometrie,
+    pub couverture: Couverture,
+    /// « designation », « gpano » ou « non-fixe ».
+    pub nord_methode: String,
+    analyse: RgbImage,
+    echelle_x: f64,
+    echelle_y: f64,
+    /// Ligne de la limite, en pixels de la photo, pour chaque colonne d'analyse.
+    limite: Vec<f64>,
+}
+
+impl Releve {
+    /// Ouvre une photo (JPEG ou PNG) et détecte la limite ciel / obstacles.
+    pub fn depuis_octets(octets: &[u8], nom: &str) -> Result<Self, String> {
+        let metadonnees = metadonnees::lire(octets);
+        let image = image::load_from_memory(octets)
+            .map_err(|e| format!("photo illisible : {e}"))?
+            .to_rgb8();
+        let image = redresser(image, metadonnees.orientation_exif);
+        let sha256 = Sha256::digest(octets).iter().map(|o| format!("{o:02x}")).collect();
+        Self::depuis_image(image, nom, sha256, metadonnees)
+    }
+
+    /// Variante sur une image déjà décodée.
+    pub fn depuis_image(
+        image: RgbImage,
+        nom: &str,
+        sha256: String,
+        metadonnees: Metadonnees,
+    ) -> Result<Self, String> {
+        let (largeur, hauteur) = image.dimensions();
+        if largeur < 360 || hauteur < 32 {
+            return Err(format!("photo trop petite pour un panorama ({largeur} × {hauteur})"));
+        }
+        let la = largeur.min(LARGEUR_ANALYSE);
+        let ha = ((hauteur as f64) * la as f64 / largeur as f64).round().max(16.0) as u32;
+        let analyse = if la == largeur {
+            image
+        } else {
+            imageops::resize(&image, la, ha, imageops::FilterType::Triangle)
+        };
+        let echelle_x = largeur as f64 / analyse.width() as f64;
+        let echelle_y = hauteur as f64 / analyse.height() as f64;
+        let donnees = ImageAnalyse::depuis(&analyse);
+        let (geometrie, couverture, nord_gpano) =
+            geometrie_initiale(&metadonnees, largeur, hauteur, &donnees, echelle_x);
+        let limite = detection::detecter(&donnees)
+            .into_iter()
+            .map(|y| y as f64 * echelle_y)
+            .collect();
+        Ok(Self {
+            nom_photo: nom.to_string(),
+            sha256,
+            largeur,
+            hauteur,
+            metadonnees,
+            geometrie,
+            couverture,
+            nord_methode: if nord_gpano { "gpano" } else { "non-fixe" }.to_string(),
+            analyse,
+            echelle_x,
+            echelle_y,
+            limite,
+        })
+    }
+
+    /// Fixe l'azimut vrai `azimut` (degrés) de la colonne `colonne` de la photo.
+    pub fn fixer_reference(&mut self, colonne: f64, azimut: f64) {
+        self.geometrie.colonne_reference = colonne;
+        self.geometrie.azimut_reference = azimut.rem_euclid(360.0);
+        self.nord_methode = "designation".to_string();
+    }
+
+    /// Désigne la colonne de la photo qui pointe au nord.
+    pub fn fixer_nord(&mut self, colonne: f64) {
+        self.fixer_reference(colonne, 0.0);
+    }
+
+    pub fn nord_fixe(&self) -> bool {
+        self.nord_methode != "non-fixe"
+    }
+
+    /// Colonne de la photo qui pointe au nord, si le nord est fixé.
+    pub fn colonne_nord(&self) -> Option<f64> {
+        self.nord_fixe().then(|| self.geometrie.colonne(0.0))
+    }
+
+    /// Ligne de la photo retenue comme horizon (hauteur 0°).
+    pub fn fixer_ligne_horizon(&mut self, ligne: f64) {
+        self.geometrie.ligne_horizon = ligne.clamp(0.0, self.hauteur as f64);
+    }
+
+    /// Pose la limite à la ligne `ligne` sur les colonnes `x0` à `x1` de la photo.
+    pub fn retoucher(&mut self, x0: f64, x1: f64, ligne: f64) {
+        let n = self.limite.len();
+        let indice = |x: f64| ((x / self.echelle_x).floor().max(0.0) as usize).min(n - 1);
+        let (a, b) = (indice(x0.min(x1)), indice(x0.max(x1)));
+        let y = ligne.clamp(0.0, self.hauteur as f64);
+        for v in &mut self.limite[a..=b] {
+            *v = y;
+        }
+    }
+
+    /// Points de la limite, en pixels de la photo : (colonne, ligne).
+    pub fn limite(&self) -> Vec<(f64, f64)> {
+        self.limite
+            .iter()
+            .enumerate()
+            .map(|(i, &y)| ((i as f64 + 0.5) * self.echelle_x, y))
+            .collect()
+    }
+
+    /// Hauteurs extrêmes couvertes par l'image (bas, haut), en degrés.
+    pub fn champ_vertical(&self) -> (f64, f64) {
+        (self.geometrie.hauteur(self.hauteur as f64), self.geometrie.hauteur(0.0))
+    }
+
+    /// Étendue horizontale du panorama, plafonnée à 360°.
+    pub fn couverture_deg(&self) -> f64 {
+        (self.largeur as f64 * 360.0 / self.geometrie.largeur_360).min(360.0)
+    }
+
+    /// Profil par degré : pour chaque secteur [i − 0,5 ; i + 0,5[, la plus haute
+    /// limite rencontrée (lecture prudente).
+    pub fn profil(&self) -> Profil {
+        let mut hauteur_min: Vec<Option<f64>> = vec![None; 360];
+        let mut hors = [false; 360];
+        let marge = 0.5 * self.echelle_y;
+        for (x, y) in self.limite() {
+            let secteur = (self.geometrie.azimut(x).round() as usize) % 360;
+            let h = self.geometrie.hauteur(y);
+            hauteur_min[secteur] = Some(hauteur_min[secteur].map_or(h, |m| m.max(h)));
+            if y <= marge {
+                hors[secteur] = true;
+            }
+        }
+        let au_dela_du_champ = (0..360u16).filter(|&i| hors[i as usize]).collect();
+        Profil { hauteur_min, au_dela_du_champ }
+    }
+
+    /// Orientation de l'appareil à la prise de vue, déduite du champ vertical et
+    /// de la focale : « portrait », « paysage » ou « inconnue ».
+    pub fn orientation(&self) -> &'static str {
+        if self.geometrie.projection != Projection::Cylindrique {
+            return "inconnue";
+        }
+        let Some(f) = self.metadonnees.focale_eq35_mm else {
+            return "inconnue";
+        };
+        let (bas, haut) = self.champ_vertical();
+        let champ = haut - bas;
+        // Capteur 4:3 de même diagonale que le 24 × 36 : 34,6 × 25,96 mm.
+        let portrait = 2.0 * (17.3 / f).atan().to_degrees();
+        let paysage = 2.0 * (12.98 / f).atan().to_degrees();
+        let (nom, ecart, attendu) = if (champ - portrait).abs() < (champ - paysage).abs() {
+            ("portrait", (champ - portrait).abs(), portrait)
+        } else {
+            ("paysage", (champ - paysage).abs(), paysage)
+        };
+        if ecart / attendu > 0.25 {
+            "inconnue"
+        } else {
+            nom
+        }
+    }
+
+    /// Objectif reconnu par sa focale équivalente.
+    pub fn objectif(&self) -> &'static str {
+        match self.metadonnees.focale_eq35_mm {
+            None => "inconnu",
+            Some(f) if f < 20.0 => "ultra-grand-angle",
+            Some(f) if f <= 35.0 => "principal",
+            Some(_) => "teleobjectif",
+        }
+    }
+
+    /// Image réduite où sont tracés la limite (rouge), l'horizon (cyan) et le
+    /// nord (jaune) : sert à juger la détection d'un coup d'œil.
+    pub fn apercu(&self) -> RgbImage {
+        let mut img = self.analyse.clone();
+        let (w, h) = (img.width(), img.height());
+        let ligne_h = (self.geometrie.ligne_horizon / self.echelle_y).round() as i64;
+        if (0..h as i64).contains(&ligne_h) {
+            for x in (0..w).step_by(2) {
+                img.put_pixel(x, ligne_h as u32, Rgb([0, 230, 230]));
+            }
+        }
+        for (i, &y) in self.limite.iter().enumerate() {
+            let yy = (y / self.echelle_y).round() as i64;
+            for d in -1..=1 {
+                let l = yy + d;
+                if (0..h as i64).contains(&l) {
+                    img.put_pixel(i as u32, l as u32, Rgb([255, 30, 30]));
+                }
+            }
+        }
+        if let Some(c) = self.colonne_nord() {
+            let mut x = c;
+            while x < self.largeur as f64 {
+                let xa = (x / self.echelle_x) as u32;
+                if xa < w {
+                    for y in 0..h {
+                        img.put_pixel(xa, y, Rgb([255, 220, 0]));
+                    }
+                }
+                x += self.geometrie.largeur_360;
+            }
+        }
+        img
+    }
+}
+
+/// Applique l'orientation EXIF (les rotations ; les miroirs n'arrivent pas en photo).
+fn redresser(image: RgbImage, orientation: Option<u32>) -> RgbImage {
+    match orientation {
+        Some(3) => imageops::rotate180(&image),
+        Some(6) => imageops::rotate90(&image),
+        Some(8) => imageops::rotate270(&image),
+        _ => image,
+    }
+}
+
+/// Géométrie de départ : GPano s'il est là, sinon sphère 2:1, sinon panorama
+/// cylindrique dont le tour se lit par recouvrement. Rend aussi si le nord est
+/// déjà connu (cap GPano).
+fn geometrie_initiale(
+    m: &Metadonnees,
+    largeur: u32,
+    hauteur: u32,
+    donnees: &ImageAnalyse,
+    echelle_x: f64,
+) -> (Geometrie, Couverture, bool) {
+    let (w, h) = (largeur as f64, hauteur as f64);
+    let mut geo = Geometrie {
+        projection: Projection::Cylindrique,
+        largeur_360: w,
+        ligne_horizon: h / 2.0,
+        colonne_reference: 0.0,
+        azimut_reference: 0.0,
+    };
+    if let Some(g) = &m.gpano {
+        if let (Some(complete), Some(rognee)) = (g.largeur_complete, g.largeur_rognee) {
+            if complete > 0.0 && rognee > 0.0 {
+                let k = w / rognee;
+                let equi = g
+                    .projection
+                    .as_deref()
+                    .is_some_and(|p| p.eq_ignore_ascii_case("equirectangular"));
+                if equi {
+                    geo.projection = Projection::Equirectangulaire;
+                    if let (Some(hc), Some(haut)) = (g.hauteur_complete, g.haut_rogne) {
+                        geo.ligne_horizon = (hc / 2.0 - haut) * k;
+                    }
+                }
+                geo.largeur_360 = complete * k;
+                let mut nord = false;
+                if let Some(cap) = g.cap_deg {
+                    geo.colonne_reference = (complete / 2.0 - g.gauche_rognee.unwrap_or(0.0)) * k;
+                    geo.azimut_reference = cap.rem_euclid(360.0);
+                    nord = true;
+                }
+                return (geo, Couverture::GPano, nord);
+            }
+        }
+    }
+    if largeur == 2 * hauteur {
+        geo.projection = Projection::Equirectangulaire;
+        return (geo, Couverture::Supposee, false);
+    }
+    match detection::largeur_tour(donnees) {
+        Some(p) => {
+            geo.largeur_360 = p as f64 * echelle_x;
+            (geo, Couverture::Chevauchement, false)
+        }
+        None => (geo, Couverture::Supposee, false),
+    }
+}

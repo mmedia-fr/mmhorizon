@@ -1,0 +1,12 @@
+# Fins de ligne imposées par type de fichier (repris de MMdedit) : cmd.exe ne lit
+# pas un .bat en LF, bash refuse un .sh en CRLF.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+*.sh  text eol=lf
+*.py  text eol=lf
+*.iss text eol=crlf
+
+*.ico binary
+*.png binary
+*.jpg binary

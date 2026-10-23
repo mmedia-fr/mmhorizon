@@ -41,6 +41,7 @@ produire ou le consommer.
     },
     "projection": "cylindrique",
     "couverture_azimut_deg": 360,
+    "couverture_methode": "chevauchement",
     "orientation": "paysage",
     "objectif": { "type": "principal", "focale_eq35_mm": 26 },
     "nord": { "methode": "designation", "colonne_px": 4321.5 },
@@ -65,16 +66,17 @@ l'exemple est tronqué.
 | Champ | Sens |
 |---|---|
 | `format`, `version` | Identifiant du format et version. Un lecteur refuse une version qu'il ne connaît pas. |
-| `site.latitude`, `site.longitude` | Degrés décimaux, WGS 84, est positif. |
+| `site.latitude`, `site.longitude` | Degrés décimaux, WGS 84, est positif ; `null` si inconnus. |
 | `site.altitude_m` | Altitude du point de prise de vue, si connue. |
 | `site.hauteur_objectif_m` | Hauteur de l'objectif au-dessus du sol ou de la plateforme, si renseignée. |
 | `releve.date` | Date et heure de la photo, ISO 8601 avec décalage horaire. |
 | `releve.photo.sha256` | Empreinte du fichier source, pour retrouver la photo d'origine. |
 | `releve.projection` | `cylindrique` (panorama de téléphone) ou `equirectangulaire` (sphère photo). |
 | `releve.couverture_azimut_deg` | Étendue horizontale du panorama ; 360 pour un tour complet. |
+| `releve.couverture_methode` | Comment le tour a été mesuré : `gpano` (métadonnées), `chevauchement` (la fin du panorama reprend son début) ou `supposee` (la photo est tenue pour un tour exact). Facultatif. |
 | `releve.orientation` | `portrait`, `paysage` ou `inconnue` — déduite de la photo. |
 | `releve.objectif` | `principal`, `ultra-grand-angle` ou `inconnu`, et focale équivalente 35 mm lue dans l'EXIF. |
-| `releve.nord` | Comment le nord a été fixé, et la colonne du panorama qui lui correspond. |
+| `releve.nord` | Comment le nord a été fixé — `designation` (désigné sur la photo), `gpano` (cap des métadonnées) ou `non-fixe` (azimuts relatifs, fichier inutilisable pour l'observation) — et la colonne du panorama qui lui correspond. |
 | `releve.ligne_horizon_px` | Ligne de l'image retenue comme hauteur 0°. |
 | `releve.champ_vertical_deg` | Hauteurs extrêmes couvertes par l'image. |
 | `pas_deg` | Pas d'azimut du tableau ; 1 en version 1. |

@@ -1,0 +1,11 @@
+!build/
+# Fabrication
+_build/
+core/target/
+noyau/target/
+dist/
+.qmlls.ini
+
+# OS
+.DS_Store
+Thumbs.db

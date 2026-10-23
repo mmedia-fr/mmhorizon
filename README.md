@@ -1,0 +1,56 @@
+# MMhorizon
+
+Relevé de la zone de ciel observable depuis un lieu, à partir d'une photo
+panoramique 360°. Pour Windows, Linux et Android. Logiciel libre sous
+**GNU GPL v3**.
+
+> **État** : conception arrêtée, développement non commencé.
+
+---
+
+## Principe
+
+1. Prendre un panorama 360° du lieu d'observation : téléphone sur pied, en
+   portrait ou en paysage, tour complet.
+2. Le charger dans MMhorizon. Le lieu, l'altitude et la date sont lus dans
+   les métadonnées de la photo ; on les saisit s'ils manquent.
+3. Toucher, sur le panorama, le point qui est au nord.
+4. Vérifier la limite ciel / obstacles détectée, et la corriger au besoin au
+   doigt ou à la souris.
+5. Exporter.
+
+L'orientation de la prise de vue et l'objectif utilisé se déduisent de la
+photo : il n'y a rien à régler.
+
+## Ce que l'on obtient
+
+Un fichier `.horizon.json` qui donne, pour chaque degré d'azimut, la hauteur
+au-dessus de laquelle le ciel est dégagé, ainsi que les zones masquées par le
+haut (avant-toit, branches). Le format est ouvert et documenté :
+[docs/FORMAT.md](docs/FORMAT.md). Tout logiciel, ou tout assistant, peut s'en
+servir pour savoir si une cible est visible à une heure donnée.
+
+Exports vers les logiciels courants :
+
+- **AstroMosaic** (planificateur de seestar_alp) — 71 valeurs, une tous les 5° ;
+- **N.I.N.A.** — fichier d'horizon `.hrz` ;
+- **Stellarium** — paysage polygonal.
+
+## Précision de la prise de vue
+
+Sur un tour complet, la largeur de l'image vaut 360° : l'échelle s'en déduit
+sans connaître l'objectif. Le seul repère supplémentaire est la ligne
+d'horizon.
+
+Le champ vertical dépend de l'orientation et de l'objectif — environ ±26° en
+paysage avec l'objectif principal, ±34° en portrait, ±45° en paysage avec
+l'ultra grand-angle. Un obstacle qui dépasse le haut de l'image est marqué
+« au-delà du champ » : on sait qu'il masque le ciel au moins jusque-là.
+
+L'objectif d'un téléphone sur pied est décalé de quelques centimètres de
+l'axe de rotation. L'erreur qui en résulte est de l'ordre de 0,7° pour un
+obstacle à 5 m et de 0,2° à 20 m ; elle n'est pas corrigée.
+
+## Licence
+
+GNU General Public License v3 — voir [LICENSE](LICENSE).

@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=MMhorizon
+GenericName=Relevé d'horizon
+Comment=Zone de ciel observable à partir d'un panorama 360° — outil M-Media
+Exec=mmhorizon %f
+Icon=mmhorizon
+Categories=Education;Science;Astronomy;
+MimeType=image/jpeg;image/png;
+Terminal=false
+StartupWMClass=mmhorizon

@@ -1,0 +1,34 @@
+[package]
+name = "mmhorizon_noyau"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+license = "GPL-3.0-or-later"
+publish = false
+description = "Zone de ciel observable à partir d'un panorama 360° : détection, géométrie, format .horizon.json"
+
+[lib]
+name = "mmhorizon_noyau"
+
+[[bin]]
+name = "mmhorizon-calcul"
+path = "src/bin/mmhorizon-calcul.rs"
+
+[dependencies]
+# Décodage des photos : JPEG et PNG seulement, en pur Rust (rien à compiler
+# pour Android).
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+# EXIF : lieu, date, focale, orientation.
+kamadak-exif = "0.6"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Empreinte de la photo source, inscrite dans le fichier produit.
+sha2 = "0.10"
+
+# Le décodage d'un panorama de 25 Mpx est lent sans optimisation : les tests
+# et l'outil en mode debug restent utilisables avec un niveau minimal.
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3

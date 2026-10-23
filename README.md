@@ -4,7 +4,9 @@ Relevé de la zone de ciel observable depuis un lieu, à partir d'une photo
 panoramique 360°. Pour Windows, Linux et Android. Logiciel libre sous
 **GNU GPL v3**.
 
-> **État** : conception arrêtée, développement non commencé.
+> **État** : en développement. Le noyau de calcul et l'outil en ligne de
+> commande `mmhorizon-calcul` fonctionnent ; l'application est un premier
+> squelette.
 
 ---
 
@@ -50,6 +52,34 @@ l'ultra grand-angle. Un obstacle qui dépasse le haut de l'image est marqué
 L'objectif d'un téléphone sur pied est décalé de quelques centimètres de
 l'axe de rotation. L'erreur qui en résulte est de l'ordre de 0,7° pour un
 obstacle à 5 m et de 0,2° à 20 m ; elle n'est pas corrigée.
+
+## Outil en ligne de commande
+
+`mmhorizon-calcul` fait le même calcul sans interface, sur tout système :
+
+```
+mmhorizon-calcul panorama.jpg --nord 4321 --exports exports --apercu apercu.png
+```
+
+- `--nord X` : colonne de la photo, en pixels, qui pointe au nord vrai ;
+  `--repere X:AZ` pour un repère d'azimut connu ;
+- `--ligne-horizon Y` : ligne de la photo à 0° (par défaut, le milieu) ;
+- `--nom`, `--lat`, `--lon`, `--alt` : le site, si l'EXIF ne le donne pas ;
+- `--exports DOSSIER` : AstroMosaic, N.I.N.A. et Stellarium en plus du
+  `.horizon.json` ;
+- `--apercu FICHIER.png` : image réduite où sont tracés la limite détectée
+  (rouge), l'horizon (cyan) et le nord (jaune).
+
+`mmhorizon-calcul --controle` éprouve toute la chaîne sur un panorama de
+synthèse dont le profil est connu.
+
+## Construire
+
+- Noyau et outil : `cargo build --release --manifest-path noyau/Cargo.toml`.
+- Application : Qt 6.4 ou plus récent, Rust stable, CMake ;
+  `cmake -S . -B _build -DCMAKE_BUILD_TYPE=Release && cmake --build _build`.
+  L'intégration continue (`.github/workflows/socle.yml`) construit et éprouve
+  Windows, Linux (AppImage), macOS et Android.
 
 ## Licence
 

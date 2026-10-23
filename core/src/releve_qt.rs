@@ -161,6 +161,9 @@ fn resume(r: &Releve) -> String {
     if hors > 0 {
         texte.push_str(&format!(" · {hors}° au-delà du champ"));
     }
+    if r.gpano_ecarte.is_some() {
+        texte.push_str(" · GPano écarté");
+    }
     texte
 }
 

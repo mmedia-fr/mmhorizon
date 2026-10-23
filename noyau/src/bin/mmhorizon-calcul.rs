@@ -143,6 +143,9 @@ fn executer() -> Result<(), String> {
         "orientation {}, objectif {}, nord : {}",
         f.releve.orientation, f.releve.objectif.genre, f.releve.nord.methode
     );
+    if let Some(motif) = &r.gpano_ecarte {
+        eprintln!("attention : {motif}");
+    }
     if !r.nord_fixe() {
         eprintln!("attention : nord non fixé — les azimuts sont relatifs à la colonne 0 (--nord X)");
     }

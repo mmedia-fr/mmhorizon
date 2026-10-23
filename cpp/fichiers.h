@@ -91,6 +91,10 @@ public:
 
   /// Décode la photo pour l'affichage, orientation EXIF appliquée comme dans
   /// le noyau, réduite à LargeurAffichage.
+  ///
+  /// La réduction se fait au décodage : décodée en pleine taille, une photo de
+  /// 12 672 × 2 800 pixels (Galaxy S26) dépasse la limite d'allocation de
+  /// 128 Mo de QImageReader, qui la refuse.
   Q_INVOKABLE bool poserApercu(const QByteArray& octets)
   {
     QBuffer tampon;
@@ -98,6 +102,12 @@ public:
     tampon.open(QIODevice::ReadOnly);
     QImageReader lecteur(&tampon);
     lecteur.setAutoTransform(true);
+    // Taille et réduction s'entendent avant la rotation EXIF.
+    const QSize stockee = lecteur.size();
+    const bool tournee = lecteur.transformation() & QImageIOHandler::TransformationRotate90;
+    const int largeur = tournee ? stockee.height() : stockee.width();
+    if (largeur > LargeurAffichage)
+      lecteur.setScaledSize(stockee * (double(LargeurAffichage) / largeur));
     QImage image = lecteur.read();
     if (image.isNull() || !apercu)
       return false;

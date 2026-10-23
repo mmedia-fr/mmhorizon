@@ -81,6 +81,12 @@ jobs:
             noyau
           # La clé par défaut ne distingue pas les versions d'Ubuntu.
           key: ${{ matrix.os }}
+      # Avant l'environnement MSVC : sous Git Bash, il fait passer le « link » de
+      # Git (/usr/bin/link) devant link.exe, et rustc échoue à l'édition de liens
+      # (« /usr/bin/link: extra operand »). Sans lui, rustc trouve MSVC seul.
+      - name: Panorama d'essai
+        shell: bash
+        run: cargo run --manifest-path noyau/Cargo.toml --release --locked --bin mmhorizon-calcul -- --synthese "Panorama été.png"
       - uses: jurplel/install-qt-action@v4
         with:
           version: ${{ env.QT_VERSION }}
@@ -103,9 +109,6 @@ jobs:
         run: ctest --test-dir _build --output-on-failure -C Release
         env:
           QT_QPA_PLATFORM: offscreen
-      - name: Panorama d'essai
-        shell: bash
-        run: cargo run --manifest-path noyau/Cargo.toml --release --locked --bin mmhorizon-calcul -- --synthese "Panorama été.png"
 
       # ---- Windows : l'installeur ------------------------------------------
       - name: Paquet Windows

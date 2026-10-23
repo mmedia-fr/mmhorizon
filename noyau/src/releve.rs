@@ -12,6 +12,13 @@ use sha2::{Digest, Sha256};
 /// parallaxe du support (de l'ordre du demi-degré).
 pub const LARGEUR_ANALYSE: u32 = 3600;
 
+/// Part du champ de l'objectif qu'un panorama de téléphone garde en hauteur. Il en
+/// rogne un peu pour raccorder les vues (de l'ordre du quart sur le Galaxy S26 à
+/// l'ultra grand-angle), jamais la moitié ; et il ne peut pas voir plus haut que
+/// l'objectif. Hors de ces bornes, un GPano décrit une autre photo que celle-ci.
+const CHAMP_GARDE_MIN: f64 = 0.6;
+const CHAMP_GARDE_MAX: f64 = 1.2;
+
 /// Profil par degré d'azimut vrai.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Profil {
@@ -50,6 +57,8 @@ pub struct Releve {
     pub metadonnees: Metadonnees,
     pub geometrie: Geometrie,
     pub couverture: Couverture,
+    /// Pourquoi le GPano de la photo a été écarté, s'il l'a été.
+    pub gpano_ecarte: Option<String>,
     /// « designation », « gpano » ou « non-fixe ».
     pub nord_methode: String,
     analyse: RgbImage,
@@ -92,7 +101,7 @@ impl Releve {
         let echelle_x = largeur as f64 / analyse.width() as f64;
         let echelle_y = hauteur as f64 / analyse.height() as f64;
         let donnees = ImageAnalyse::depuis(&analyse);
-        let (geometrie, couverture, nord_gpano) =
+        let (geometrie, couverture, nord_gpano, gpano_ecarte) =
             geometrie_initiale(&metadonnees, largeur, hauteur, &donnees, echelle_x);
         let limite = detection::detecter(&donnees)
             .into_iter()
@@ -106,6 +115,7 @@ impl Releve {
             metadonnees,
             geometrie,
             couverture,
+            gpano_ecarte,
             nord_methode: if nord_gpano { "gpano" } else { "non-fixe" }.to_string(),
             analyse,
             echelle_x,
@@ -199,9 +209,7 @@ impl Releve {
         };
         let (bas, haut) = self.champ_vertical();
         let champ = haut - bas;
-        // Capteur 4:3 de même diagonale que le 24 × 36 : 34,6 × 25,96 mm.
-        let portrait = 2.0 * (17.3 / f).atan().to_degrees();
-        let paysage = 2.0 * (12.98 / f).atan().to_degrees();
+        let (paysage, portrait) = champs_objectif(f);
         let (nom, ecart, attendu) = if (champ - portrait).abs() < (champ - paysage).abs() {
             ("portrait", (champ - portrait).abs(), portrait)
         } else {
@@ -270,16 +278,44 @@ fn redresser(image: RgbImage, orientation: Option<u32>) -> RgbImage {
     }
 }
 
-/// Géométrie de départ : GPano s'il est là, sinon sphère 2:1, sinon panorama
-/// cylindrique dont le tour se lit par recouvrement. Rend aussi si le nord est
-/// déjà connu (cap GPano).
+/// Champs verticaux, en degrés, d'un objectif de focale équivalente `focale` (mm)
+/// tenu en paysage puis en portrait. Capteur 4:3 de même diagonale que le
+/// 24 × 36 : 34,6 × 25,96 mm.
+fn champs_objectif(focale: f64) -> (f64, f64) {
+    (2.0 * (12.98 / focale).atan().to_degrees(), 2.0 * (17.3 / focale).atan().to_degrees())
+}
+
+/// Un GPano de panorama cylindrique fixe l'échelle, donc le champ vertical de
+/// l'image : il doit rester dans ce que l'objectif de la photo peut couvrir. Rend
+/// la raison de l'écarter, ou `None` s'il tient (ou si rien ne permet d'en juger).
+fn incoherence_gpano(m: &Metadonnees, geo: &Geometrie, largeur: u32, hauteur: u32) -> Option<String> {
+    let focale = m.focale_eq35_mm?;
+    if geo.projection != Projection::Cylindrique || focale <= 0.0 {
+        return None;
+    }
+    let champ = geo.hauteur(0.0) - geo.hauteur(hauteur as f64);
+    let (paysage, portrait) = champs_objectif(focale);
+    if (CHAMP_GARDE_MIN * paysage..=CHAMP_GARDE_MAX * portrait).contains(&champ) {
+        return None;
+    }
+    let annonce = largeur as f64 * 360.0 / geo.largeur_360;
+    Some(format!(
+        "GPano écarté : {annonce:.0}° annoncés donnent un champ vertical de {champ:.0}°, \
+         quand l'objectif ({focale:.0} mm éq.) couvre {paysage:.0}° en paysage et {portrait:.0}° en portrait"
+    ))
+}
+
+/// Géométrie de départ : GPano s'il est là et cohérent avec l'objectif, sinon
+/// sphère 2:1, sinon panorama cylindrique dont le tour se lit par recouvrement.
+/// Rend aussi si le nord est déjà connu (cap GPano), et la raison d'avoir écarté
+/// le GPano.
 fn geometrie_initiale(
     m: &Metadonnees,
     largeur: u32,
     hauteur: u32,
     donnees: &ImageAnalyse,
     echelle_x: f64,
-) -> (Geometrie, Couverture, bool) {
+) -> (Geometrie, Couverture, bool, Option<String>) {
     let (w, h) = (largeur as f64, hauteur as f64);
     let mut geo = Geometrie {
         projection: Projection::Cylindrique,
@@ -288,40 +324,99 @@ fn geometrie_initiale(
         colonne_reference: 0.0,
         azimut_reference: 0.0,
     };
+    let mut ecarte = None;
     if let Some(g) = &m.gpano {
         if let (Some(complete), Some(rognee)) = (g.largeur_complete, g.largeur_rognee) {
             if complete > 0.0 && rognee > 0.0 {
                 let k = w / rognee;
+                let mut gp = geo.clone();
                 let equi = g
                     .projection
                     .as_deref()
                     .is_some_and(|p| p.eq_ignore_ascii_case("equirectangular"));
                 if equi {
-                    geo.projection = Projection::Equirectangulaire;
+                    gp.projection = Projection::Equirectangulaire;
                     if let (Some(hc), Some(haut)) = (g.hauteur_complete, g.haut_rogne) {
-                        geo.ligne_horizon = (hc / 2.0 - haut) * k;
+                        gp.ligne_horizon = (hc / 2.0 - haut) * k;
                     }
                 }
-                geo.largeur_360 = complete * k;
+                gp.largeur_360 = complete * k;
                 let mut nord = false;
                 if let Some(cap) = g.cap_deg {
-                    geo.colonne_reference = (complete / 2.0 - g.gauche_rognee.unwrap_or(0.0)) * k;
-                    geo.azimut_reference = cap.rem_euclid(360.0);
+                    gp.colonne_reference = (complete / 2.0 - g.gauche_rognee.unwrap_or(0.0)) * k;
+                    gp.azimut_reference = cap.rem_euclid(360.0);
                     nord = true;
                 }
-                return (geo, Couverture::GPano, nord);
+                ecarte = incoherence_gpano(m, &gp, largeur, hauteur);
+                if ecarte.is_none() {
+                    return (gp, Couverture::GPano, nord, None);
+                }
             }
         }
     }
     if largeur == 2 * hauteur {
         geo.projection = Projection::Equirectangulaire;
-        return (geo, Couverture::Supposee, false);
+        return (geo, Couverture::Supposee, false, ecarte);
     }
     match detection::largeur_tour(donnees) {
         Some(p) => {
             geo.largeur_360 = p as f64 * echelle_x;
-            (geo, Couverture::Chevauchement, false)
+            (geo, Couverture::Chevauchement, false, ecarte)
         }
-        None => (geo, Couverture::Supposee, false),
+        None => (geo, Couverture::Supposee, false, ecarte),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::metadonnees::GPano;
+    use crate::synthese;
+
+    fn releve(image: RgbImage, focale: Option<f64>, complete: f64) -> Releve {
+        let largeur = image.width() as f64;
+        let m = Metadonnees {
+            focale_eq35_mm: focale,
+            gpano: Some(GPano {
+                projection: Some("cylindrical".into()),
+                largeur_complete: Some(complete),
+                largeur_rognee: Some(largeur),
+                gauche_rognee: Some((complete - largeur) / 2.0),
+                ..GPano::default()
+            }),
+            ..Metadonnees::default()
+        };
+        Releve::depuis_image(image, "essai.png", String::new(), m).unwrap()
+    }
+
+    // Le panorama de synthèse fait un tour de 1 800 px sur 360 de haut : champ
+    // vertical de 64°, celui d'un 21 mm éq. tenu en paysage (63°).
+
+    #[test]
+    fn gpano_fidele_d_un_demi_tour_conserve() {
+        let demi = imageops::crop_imm(&synthese::panorama(1800, 360, 0), 0, 0, 900, 360).to_image();
+        let r = releve(demi, Some(21.0), 1800.0);
+        assert_eq!(r.couverture, Couverture::GPano);
+        assert_eq!(r.gpano_ecarte, None);
+        assert!((r.geometrie.largeur_360 - 1800.0).abs() < 1e-9);
+        assert!((r.couverture_deg() - 180.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn gpano_incoherent_avec_l_objectif_ecarte() {
+        // Tour complet annoncé pour un demi-tour, comme le Galaxy S26 à l'ultra
+        // grand-angle : le champ vertical tomberait à 33°.
+        let r = releve(synthese::panorama(1800, 360, 90), Some(21.0), 3780.0);
+        assert_eq!(r.couverture, Couverture::Chevauchement);
+        assert!(r.gpano_ecarte.as_deref().is_some_and(|m| m.starts_with("GPano écarté : 180°")));
+        assert!((r.geometrie.largeur_360 - 1800.0).abs() < 10.0, "{}", r.geometrie.largeur_360);
+        assert_eq!(r.orientation(), "paysage");
+    }
+
+    #[test]
+    fn gpano_conserve_sans_focale_pour_en_juger() {
+        let r = releve(synthese::panorama(1800, 360, 90), None, 3780.0);
+        assert_eq!(r.couverture, Couverture::GPano);
+        assert_eq!(r.gpano_ecarte, None);
     }
 }

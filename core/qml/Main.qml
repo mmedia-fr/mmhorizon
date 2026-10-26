@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Fenêtre de MMhorizon : panorama, désignation du nord, horizon, retouche, export.
+// Fenêtre de MMhorizon : panorama, désignation du nord ou du soleil, tour,
+// horizon, retouche, export.
 // Écrit pour Qt 6.4 (machine de développement Debian 12) comme pour Qt 6.8.
 import QtQuick
 import QtQuick.Controls
@@ -15,10 +16,27 @@ ApplicationWindow {
     visible: true
     title: releve.charge ? "MMhorizon — " + nomPhoto : "MMhorizon"
 
-    // « » : simple consultation ; « nord », « horizon », « retouche » : le prochain
-    // geste sur le panorama sert à cela.
+    // « » : simple consultation ; « nord », « soleil », « horizon », « tour »,
+    // « retouche » : le prochain geste sur le panorama sert à cela.
     property string mode: ""
     property string nomPhoto: ""
+    // Couleur de chaque geste, sur son bouton et sur les repères qu'il laisse.
+    readonly property var couleurs: ({ nord: "#ffd800", soleil: "#ff8c00", horizon: "#00e0e0", tour: "#ff00ff" })
+    // Points touchés, gardés sur le panorama : {colonne, ligne} en pixels de la photo.
+    property var marquesSoleil: []
+    property var marquesTour: []
+    property var premierPoint: null
+    // Le clic sur le soleil dont viennent le nord et l'horizon.
+    property var dernierSoleil: null
+    // Compte rendu du dernier geste, à la place des consignes du mode.
+    property string message: ""
+    onModeChanged: {
+        message = ""
+        if (premierPoint) {
+            premierPoint = null
+            trace.requestPaint()
+        }
+    }
     property int numeroApercu: 0
     property var points: []
     property real zoom: 1.0
@@ -48,6 +66,11 @@ ApplicationWindow {
             return false
         }
         fichiers.poserApercu(octets)
+        marquesSoleil = []
+        marquesTour = []
+        premierPoint = null
+        dernierSoleil = null
+        message = ""
         numeroApercu += 1
         nomPhoto = fichiers.nom(url)
         champNom.text = releve.nomSite()
@@ -55,6 +78,80 @@ ApplicationWindow {
         vue.contentX = 0
         mode = releve.nord < 0 ? "nord" : ""
         return true
+    }
+
+    // Instant de la prise de vue pour le noyau : la date EXIF si elle porte son
+    // décalage horaire, sinon lue comme l'heure locale de cet ordinateur.
+    function instantPhoto() {
+        const d = releve.date
+        if (/([+-]\d\d:?\d\d|Z)$/.test(d))
+            return d
+        const m = d.match(/^(\d+)-(\d+)-(\d+)T(\d+):(\d+):(\d+)/)
+        return m ? new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]).toISOString() : d
+    }
+
+    function couverture() {
+        return "un tour fait " + Math.round(releve.tour) + " px, la photo couvre "
+            + Math.round(releve.largeur * 360 / releve.tour) + "°"
+    }
+
+    function orienterSurSoleil(prefixe, suffixe) {
+        const texte = releve.orienterSoleil(dernierSoleil.colonne, dernierSoleil.ligne, instantPhoto())
+        if (texte.length === 0) {
+            alerte.montrer(releve.erreur)
+            return
+        }
+        message = prefixe + texte + suffixe
+    }
+
+    // Deux clics éloignés d'au moins une demi-largeur de photo, au plus d'une
+    // largeur : le même point vu aux deux bouts d'un panorama qui dépasse le tour.
+    function auxDeuxBouts(a, b) {
+        const ecart = Math.abs(b - a)
+        return ecart >= releve.largeur / 2 && ecart <= releve.largeur
+    }
+
+    function toucherSoleil(colonne, ligne) {
+        if (dernierSoleil && auxDeuxBouts(dernierSoleil.colonne, colonne)) {
+            if (!releve.fixerTour(dernierSoleil.colonne, colonne)) {
+                alerte.montrer(releve.erreur)
+                return
+            }
+            marquesSoleil = [marquesSoleil[0], { colonne: colonne, ligne: ligne }]
+            marquesTour = []
+            dernierSoleil = { colonne: dernierSoleil.colonne, ligne: (dernierSoleil.ligne + ligne) / 2 }
+            mode = ""
+            orienterSurSoleil("Soleil touché aux deux bouts : " + couverture() + ". ", "")
+        } else {
+            dernierSoleil = { colonne: colonne, ligne: ligne }
+            marquesSoleil = [dernierSoleil]
+            orienterSurSoleil("", " S'il paraît aussi à l'autre bout du panorama, touchez-le là aussi.")
+        }
+        trace.requestPaint()
+    }
+
+    function toucherTour(colonne, ligne) {
+        if (!premierPoint) {
+            premierPoint = { colonne: colonne, ligne: ligne }
+            message = "Premier point en colonne " + Math.round(colonne)
+                + " : touchez le même point à l'autre bout du panorama."
+            trace.requestPaint()
+            return
+        }
+        const premier = premierPoint
+        premierPoint = null
+        trace.requestPaint()
+        if (!releve.fixerTour(premier.colonne, colonne)) {
+            alerte.montrer(releve.erreur)
+            return
+        }
+        marquesTour = [premier, { colonne: colonne, ligne: ligne }]
+        mode = ""
+        const texte = couverture().charAt(0).toUpperCase() + couverture().slice(1) + "."
+        if (dernierSoleil)
+            orienterSurSoleil(texte + " Nord et horizon refaits d'après le soleil. ", "")
+        else
+            message = texte
     }
 
     // Contrôle de fabrication : chaîne complète du noyau sur un panorama de synthèse.
@@ -90,29 +187,63 @@ ApplicationWindow {
         dialogueEnregistrer.open()
     }
 
+    // Bouton d'un geste sur le panorama, marqué de la couleur de ses repères.
+    component BoutonMode: ToolButton {
+        id: bouton
+        property string cle
+        property string aide
+        checkable: true
+        enabled: releve.charge
+        checked: fenetre.mode === cle
+        onClicked: fenetre.mode = checked ? cle : ""
+        ToolTip.visible: hovered
+        ToolTip.text: aide
+        contentItem: Row {
+            spacing: 6
+            Rectangle {
+                width: 12
+                height: 12
+                radius: 2
+                anchors.verticalCenter: parent.verticalCenter
+                color: fenetre.couleurs[bouton.cle]
+                opacity: bouton.enabled ? 1 : 0.4
+            }
+            Label {
+                text: bouton.text
+                anchors.verticalCenter: parent.verticalCenter
+                opacity: bouton.enabled ? 1 : 0.4
+            }
+        }
+    }
+
     header: ToolBar {
         RowLayout {
             anchors.fill: parent
             spacing: 4
             ToolButton { text: "Ouvrir…"; onClicked: dialogueOuvrir.open() }
             ToolSeparator {}
-            ToolButton {
+            BoutonMode {
                 text: "Nord"
-                checkable: true
-                enabled: releve.charge
-                checked: fenetre.mode === "nord"
-                onClicked: fenetre.mode = checked ? "nord" : ""
-                ToolTip.visible: hovered
-                ToolTip.text: "Touchez le point du panorama qui est au nord"
+                cle: "nord"
+                aide: "Touchez le point du panorama qui est au nord"
             }
-            ToolButton {
+            BoutonMode {
+                text: "Soleil"
+                cle: "soleil"
+                enabled: releve.charge && releve.date.length > 0 && releve.gps
+                aide: releve.date.length > 0 && releve.gps
+                    ? "Touchez le centre du soleil : sa position à l'heure de la photo donne le nord et l'horizon"
+                    : "Il faut la date et le lieu de la photo (EXIF)"
+            }
+            BoutonMode {
                 text: "Horizon"
-                checkable: true
-                enabled: releve.charge
-                checked: fenetre.mode === "horizon"
-                onClicked: fenetre.mode = checked ? "horizon" : ""
-                ToolTip.visible: hovered
-                ToolTip.text: "Touchez la ligne de l'image qui est à 0° (proposée : le milieu)"
+                cle: "horizon"
+                aide: "Touchez la ligne de l'image qui est à 0° (proposée : le milieu)"
+            }
+            BoutonMode {
+                text: "Tour"
+                cle: "tour"
+                aide: "Touchez un point au début du panorama, puis le même point à la fin : leur écart fait un tour"
             }
             ToolButton {
                 text: "Retoucher"
@@ -203,7 +334,7 @@ ApplicationWindow {
                         return
                     const sx = plan.sx, sy = plan.sy
                     // Horizon (0°)
-                    ctx.strokeStyle = "#00e0e0"
+                    ctx.strokeStyle = fenetre.couleurs.horizon
                     ctx.lineWidth = 1
                     ctx.setLineDash([6, 4])
                     ctx.beginPath()
@@ -229,17 +360,37 @@ ApplicationWindow {
                             let x = releve.nord + k * releve.tour / 4
                             while (x - releve.tour >= 0) x -= releve.tour
                             for (; x < releve.largeur; x += releve.tour) {
-                                ctx.strokeStyle = k === 0 ? "#ffd800" : "rgba(255,216,0,0.45)"
+                                ctx.strokeStyle = fenetre.couleurs.nord
+                                ctx.globalAlpha = k === 0 ? 1 : 0.45
                                 ctx.lineWidth = k === 0 ? 2 : 1
                                 ctx.beginPath()
                                 ctx.moveTo(x * sx, 0)
                                 ctx.lineTo(x * sx, height)
                                 ctx.stroke()
-                                ctx.fillStyle = "#ffd800"
+                                ctx.fillStyle = fenetre.couleurs.nord
+                                ctx.globalAlpha = 1
                                 ctx.fillText(noms[k], x * sx + 4, 18)
                             }
                         }
                     }
+                    // Points touchés : un trait sur toute la hauteur, un cercle au point.
+                    const marque = (p, couleur) => {
+                        ctx.strokeStyle = couleur
+                        ctx.lineWidth = 2
+                        ctx.setLineDash([4, 4])
+                        ctx.beginPath()
+                        ctx.moveTo(p.colonne * sx, 0)
+                        ctx.lineTo(p.colonne * sx, height)
+                        ctx.stroke()
+                        ctx.setLineDash([])
+                        ctx.beginPath()
+                        ctx.arc(p.colonne * sx, p.ligne * sy, 8, 0, 2 * Math.PI)
+                        ctx.stroke()
+                    }
+                    fenetre.marquesSoleil.forEach((p) => marque(p, fenetre.couleurs.soleil))
+                    fenetre.marquesTour.forEach((p) => marque(p, fenetre.couleurs.tour))
+                    if (fenetre.premierPoint)
+                        marque(fenetre.premierPoint, fenetre.couleurs.tour)
                 }
             }
 
@@ -263,11 +414,17 @@ ApplicationWindow {
                 }
                 onClicked: (souris) => {
                     if (fenetre.mode === "nord") {
+                        fenetre.dernierSoleil = null
                         releve.fixerNord(souris.x / plan.sx)
                         fenetre.mode = ""
                     } else if (fenetre.mode === "horizon") {
+                        fenetre.dernierSoleil = null
                         releve.fixerHorizon(souris.y / plan.sy)
                         fenetre.mode = ""
+                    } else if (fenetre.mode === "soleil") {
+                        fenetre.toucherSoleil(souris.x / plan.sx, souris.y / plan.sy)
+                    } else if (fenetre.mode === "tour") {
+                        fenetre.toucherTour(souris.x / plan.sx, souris.y / plan.sy)
                     }
                 }
                 onWheel: (molette) => {
@@ -300,8 +457,11 @@ ApplicationWindow {
             Label {
                 Layout.fillWidth: true
                 elide: Text.ElideRight
-                text: fenetre.mode === "nord" ? "Touchez le point du panorama qui est au nord."
+                text: fenetre.message.length > 0 ? fenetre.message
+                    : fenetre.mode === "nord" ? "Touchez le point du panorama qui est au nord."
+                    : fenetre.mode === "soleil" ? "Touchez le centre du soleil. S'il paraît aux deux bouts du panorama, touchez-le aux deux : leur écart fait un tour."
                     : fenetre.mode === "horizon" ? "Touchez la ligne de l'image qui est à 0°."
+                    : fenetre.mode === "tour" ? "Touchez un point au début du panorama, puis le même point à la fin : leur écart fait un tour (360°)."
                     : fenetre.mode === "retouche" ? "Faites glisser le long de la vraie limite ciel / obstacles."
                     : releve.resume
             }

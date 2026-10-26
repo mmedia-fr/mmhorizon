@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-//! Relevé en cours, exposé à QML : chargement de la photo, nord, horizon,
-//! retouche de la limite, fichiers produits.
+//! Relevé en cours, exposé à QML : chargement de la photo, nord, soleil, tour,
+//! horizon, retouche de la limite, fichiers produits.
 //!
 //! La lecture et l'écriture des fichiers restent côté Qt (`cpp/fichiers.h`) : sous
 //! Android, une photo choisie dans la galerie arrive en URL `content://`, que
@@ -28,6 +28,10 @@ pub mod qobject {
         #[qproperty(f64, nord)]
         /// Largeur d'un tour complet, en pixels de la photo.
         #[qproperty(f64, tour)]
+        /// Date de prise de vue (EXIF, ISO 8601, décalage horaire s'il est connu) ; vide si inconnue.
+        #[qproperty(QString, date)]
+        /// Vrai si l'EXIF donne le lieu de la prise de vue.
+        #[qproperty(bool, gps)]
         /// Compte rendu d'une ligne pour la barre d'état.
         #[qproperty(QString, resume)]
         /// Dernier message d'erreur ; vide s'il n'y en a pas eu.
@@ -45,6 +49,20 @@ pub mod qobject {
         #[qinvokable]
         #[cxx_name = "fixerNord"]
         fn fixer_nord(self: Pin<&mut Releve>, colonne: f64);
+
+        /// Largeur d'un tour : un même point vu au début (`a`) et à la fin (`b`)
+        /// du panorama. Faux, avec `erreur`, si l'écart ne peut pas être un tour.
+        #[qinvokable]
+        #[cxx_name = "fixerTour"]
+        fn fixer_tour(self: Pin<&mut Releve>, a: f64, b: f64) -> bool;
+
+        /// Oriente le panorama sur le soleil vu en (`colonne`, `ligne`) à
+        /// l'`instant` de la photo (ISO 8601 avec décalage) et au lieu de son
+        /// EXIF : nord et ligne d'horizon. Rend un compte rendu, ou une chaîne
+        /// vide avec `erreur`.
+        #[qinvokable]
+        #[cxx_name = "orienterSoleil"]
+        fn orienter_soleil(self: Pin<&mut Releve>, colonne: f64, ligne: f64, instant: &QString) -> QString;
 
         /// Ligne de la photo retenue comme horizon (0°).
         #[qinvokable]
@@ -100,6 +118,8 @@ pub struct ReleveRust {
     horizon: f64,
     nord: f64,
     tour: f64,
+    date: QString,
+    gps: bool,
     resume: QString,
     erreur: QString,
     revision: i32,
@@ -115,6 +135,8 @@ impl Default for ReleveRust {
             horizon: 0.0,
             nord: -1.0,
             tour: 0.0,
+            date: QString::default(),
+            gps: false,
             resume: QString::from("Ouvrez un panorama 360°."),
             erreur: QString::default(),
             revision: 0,
@@ -149,12 +171,18 @@ fn resume(r: &Releve) -> String {
     let (bas, haut) = r.champ_vertical();
     let nord = if r.nord_fixe() { "nord fixé" } else { "nord à désigner" };
     let hors = r.profil().au_dela_du_champ.len();
+    // La couverture du fichier s'arrête à 360° : au-delà, dire jusqu'où va la photo.
+    let etendue = r.largeur as f64 * 360.0 / r.geometrie.largeur_360;
+    let couverture = if etendue >= 360.5 {
+        format!("{etendue:.0}°, tour de {:.0} px", r.geometrie.largeur_360)
+    } else {
+        format!("{:.0}°", r.couverture_deg())
+    };
     let mut texte = format!(
-        "{} × {} px · {} · couverture {:.0}° ({}) · champ {bas:+.1}° à {haut:+.1}° · {} · {nord}",
+        "{} × {} px · {} · couverture {couverture} ({}) · champ {bas:+.1}° à {haut:+.1}° · {} · {nord}",
         r.largeur,
         r.hauteur,
         r.geometrie.projection.nom(),
-        r.couverture_deg(),
         r.couverture.nom(),
         r.orientation(),
     );
@@ -184,9 +212,13 @@ impl qobject::Releve {
         match Releve::depuis_octets(octets.as_slice(), &nom.to_string()) {
             Ok(r) => {
                 let (largeur, hauteur) = (r.largeur as i32, r.hauteur as i32);
+                let date = QString::from(r.metadonnees.date.as_deref().unwrap_or_default());
+                let gps = r.metadonnees.latitude.is_some() && r.metadonnees.longitude.is_some();
                 self.as_mut().rust_mut().releve = Some(r);
                 self.as_mut().set_largeur(largeur);
                 self.as_mut().set_hauteur(hauteur);
+                self.as_mut().set_date(date);
+                self.as_mut().set_gps(gps);
                 self.as_mut().set_erreur(QString::default());
                 self.as_mut().set_charge(true);
                 self.as_mut().actualiser();
@@ -204,6 +236,41 @@ impl qobject::Releve {
             r.fixer_nord(colonne);
         }
         self.as_mut().actualiser();
+    }
+
+    pub fn fixer_tour(mut self: Pin<&mut Self>, a: f64, b: f64) -> bool {
+        let resultat = match self.as_mut().rust_mut().releve.as_mut() {
+            Some(r) => r.fixer_tour(a, b),
+            None => return false,
+        };
+        self.as_mut().conclure(resultat).is_some()
+    }
+
+    pub fn orienter_soleil(mut self: Pin<&mut Self>, colonne: f64, ligne: f64, instant: &QString) -> QString {
+        let instant = instant.to_string();
+        let resultat = match self.as_mut().rust_mut().releve.as_mut() {
+            Some(r) => r.soleil(Some(instant.as_str()).filter(|t| !t.is_empty()), None).map(|(azimut, hauteur)| {
+                r.orienter_sur_soleil(colonne, ligne, (azimut, hauteur));
+                format!("Soleil à l'azimut {azimut:.1}°, hauteur {hauteur:.1}° le {instant} : nord et horizon fixés.")
+            }),
+            None => return QString::default(),
+        };
+        QString::from(&self.as_mut().conclure(resultat).unwrap_or_default())
+    }
+
+    /// Erreur affichée, ou relevé actualisé.
+    fn conclure<T>(mut self: Pin<&mut Self>, resultat: Result<T, String>) -> Option<T> {
+        match resultat {
+            Ok(valeur) => {
+                self.as_mut().set_erreur(QString::default());
+                self.as_mut().actualiser();
+                Some(valeur)
+            }
+            Err(e) => {
+                self.as_mut().set_erreur(QString::from(&e));
+                None
+            }
+        }
     }
 
     pub fn fixer_horizon(mut self: Pin<&mut Self>, ligne: f64) {

@@ -18,6 +18,12 @@ Repérage :
                         (sans --nord ni --repere, le cap GPano de la photo sert
                         s'il existe ; sinon les azimuts restent relatifs)
   --ligne-horizon Y     ligne de la photo à la hauteur 0° (défaut : milieu)
+  --soleil X:Y          centre du soleil sur la photo : nord et ligne d'horizon
+                        en découlent, d'après la date et le lieu de la prise de
+                        vue (EXIF, ou --date et --lat --lon) ; exclut --nord,
+                        --repere et --ligne-horizon
+  --date ISO            date et heure de la prise de vue avec décalage
+                        (2026-10-23T15:59:17+02:00), si l'EXIF ne la donne pas
   --tour A:B            colonnes d'un même point vu au début (A) et à la fin (B)
                         du panorama : leur écart est un tour, quand la photo
                         dépasse le tour sans que le recouvrement soit détecté
@@ -40,6 +46,8 @@ struct Options {
     nord: Option<(f64, f64)>,
     ligne_horizon: Option<f64>,
     tour: Option<(f64, f64)>,
+    soleil: Option<(f64, f64)>,
+    date: Option<String>,
     site: Site,
     sortie: Option<PathBuf>,
     exports: Option<PathBuf>,
@@ -59,6 +67,8 @@ fn lire_options() -> Result<Options, String> {
         nord: None,
         ligne_horizon: None,
         tour: None,
+        soleil: None,
+        date: None,
         site: Site::default(),
         sortie: None,
         exports: None,
@@ -82,6 +92,12 @@ fn lire_options() -> Result<Options, String> {
                 o.nord = Some((nombre("--repere", Some(x.into()))?, nombre("--repere", Some(az.into()))?));
             }
             "--ligne-horizon" => o.ligne_horizon = Some(nombre(&a, args.next())?),
+            "--soleil" => {
+                let v = args.next().ok_or("--soleil attend X:Y")?;
+                let (x, y) = v.split_once(':').ok_or("--soleil attend X:Y")?;
+                o.soleil = Some((nombre("--soleil", Some(x.into()))?, nombre("--soleil", Some(y.into()))?));
+            }
+            "--date" => o.date = Some(args.next().ok_or("--date attend une date ISO 8601")?),
             "--tour" => {
                 let v = args.next().ok_or("--tour attend A:B")?;
                 let (x, y) = v.split_once(':').ok_or("--tour attend A:B")?;
@@ -99,6 +115,9 @@ fn lire_options() -> Result<Options, String> {
             _ if o.photo.is_none() => o.photo = Some(a.into()),
             _ => return Err(format!("argument en trop : {a}")),
         }
+    }
+    if o.soleil.is_some() && (o.nord.is_some() || o.ligne_horizon.is_some()) {
+        return Err("--soleil fixe déjà le nord et la ligne d'horizon : sans --nord, --repere ni --ligne-horizon".into());
     }
     Ok(o)
 }
@@ -126,6 +145,16 @@ fn executer() -> Result<(), String> {
     let mut r = Releve::depuis_octets(&octets, &nom)?;
     if let Some((a, b)) = o.tour {
         r.fixer_tour(a, b)?;
+    }
+    if let Some((x, y)) = o.soleil {
+        let lieu = o.site.latitude.zip(o.site.longitude);
+        let (azimut, hauteur) = r.soleil(o.date.as_deref(), lieu)?;
+        r.orienter_sur_soleil(x, y, (azimut, hauteur));
+        println!(
+            "soleil à l'azimut {azimut:.2}°, hauteur {hauteur:.2}° : nord en colonne {:.0}, horizon en ligne {:.0}",
+            r.colonne_nord().unwrap_or_default(),
+            r.geometrie.ligne_horizon
+        );
     }
     if let Some(y) = o.ligne_horizon {
         r.fixer_ligne_horizon(y);

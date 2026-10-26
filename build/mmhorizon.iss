@@ -1,7 +1,7 @@
 ; Installeur Windows de MMhorizon (Inno Setup 6).
 
 #ifndef AppVersion
-  #define AppVersion "0.1.1"
+  #define AppVersion "0.1.2"
 #endif
 #define AppName        "MMhorizon"
 #define AppPublisher   "M-Media"

@@ -222,10 +222,12 @@ ApplicationWindow {
             spacing: 4
             ToolButton { text: "Ouvrir…"; onClicked: dialogueOuvrir.open() }
             ToolSeparator {}
+            // Dans l'ordre des étapes : le tour (il fixe l'échelle), le soleil ou le
+            // nord, puis la ligne d'horizon.
             BoutonMode {
-                text: "Nord"
-                cle: "nord"
-                aide: "Touchez le point du panorama qui est au nord"
+                text: "Tour"
+                cle: "tour"
+                aide: "Touchez un point au début du panorama, puis le même point à la fin : leur écart fait un tour"
             }
             BoutonMode {
                 text: "Soleil"
@@ -236,14 +238,14 @@ ApplicationWindow {
                     : "Il faut la date et le lieu de la photo (EXIF)"
             }
             BoutonMode {
+                text: "Nord"
+                cle: "nord"
+                aide: "Touchez le point du panorama qui est au nord"
+            }
+            BoutonMode {
                 text: "Horizon"
                 cle: "horizon"
                 aide: "Touchez la ligne de l'image qui est à 0° (proposée : le milieu)"
-            }
-            BoutonMode {
-                text: "Tour"
-                cle: "tour"
-                aide: "Touchez un point au début du panorama, puis le même point à la fin : leur écart fait un tour"
             }
             ToolButton {
                 text: "Retoucher"

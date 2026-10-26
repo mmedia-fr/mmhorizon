@@ -8,7 +8,7 @@
 //! Chaîne de traitement : [`metadonnees`] (EXIF, XMP GPano) → [`geometrie`]
 //! (pixel ↔ azimut et hauteur) → [`detection`] (limite ciel / obstacles,
 //! recouvrement du tour) → [`releve`] (profil par degré d'azimut) → [`format`]
-//! et [`exports`].
+//! et [`exports`]. [`soleil`] oriente le panorama sur le soleil qu'il montre.
 
 pub mod controle;
 pub mod detection;
@@ -17,6 +17,7 @@ pub mod format;
 pub mod geometrie;
 pub mod metadonnees;
 pub mod releve;
+pub mod soleil;
 pub mod synthese;
 mod zip_simple;
 

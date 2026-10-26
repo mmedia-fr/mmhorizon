@@ -4,6 +4,7 @@
 use crate::detection::{self, ImageAnalyse};
 use crate::geometrie::{Geometrie, Projection};
 use crate::metadonnees::{self, Metadonnees};
+use crate::soleil;
 use image::{imageops, Rgb, RgbImage};
 use sha2::{Digest, Sha256};
 
@@ -168,6 +169,31 @@ impl Releve {
         self.geometrie.largeur_360 = tour;
         self.couverture = Couverture::Designation;
         Ok(())
+    }
+
+    /// Azimut et hauteur apparente du soleil à l'instant et au lieu de la prise
+    /// de vue, d'après l'EXIF ; `instant` (ISO 8601 avec décalage) et `lieu`
+    /// (latitude, longitude) le remplacent s'ils sont donnés.
+    pub fn soleil(&self, instant: Option<&str>, lieu: Option<(f64, f64)>) -> Result<(f64, f64), String> {
+        let instant = instant
+            .or(self.metadonnees.date.as_deref())
+            .ok_or("date de la photo inconnue : l'EXIF ne la donne pas")?;
+        let (latitude, longitude) = lieu
+            .or(self.metadonnees.latitude.zip(self.metadonnees.longitude))
+            .ok_or("lieu de la photo inconnu : l'EXIF ne donne pas de position GPS")?;
+        Ok(soleil::position(latitude, longitude, soleil::jour_julien(instant)?))
+    }
+
+    /// Oriente le panorama sur le soleil vu en (`colonne`, `ligne`), à
+    /// l'azimut et à la hauteur `soleil` (degrés) : fixe le nord et la ligne
+    /// d'horizon. Le tour doit être juste : il règle l'échelle des hauteurs.
+    pub fn orienter_sur_soleil(&mut self, colonne: f64, ligne: f64, soleil: (f64, f64)) {
+        let (azimut, hauteur) = soleil;
+        // Lignes entre l'horizon et la hauteur du soleil, quelle que soit la
+        // ligne d'horizon actuelle.
+        let ecart = self.geometrie.ligne_horizon - self.geometrie.ligne(hauteur);
+        self.fixer_ligne_horizon(ligne + ecart);
+        self.fixer_reference(colonne, azimut);
     }
 
     /// Ligne de la photo retenue comme horizon (hauteur 0°).
@@ -480,6 +506,28 @@ mod tests {
         assert_eq!(f.releve.couverture_methode.as_deref(), Some("designation"));
         let (moyen, p95) = crate::controle::ecarts(&f).unwrap();
         assert!(moyen < 0.3 && p95 < 0.8, "moyen {moyen:.2}, 95 % {p95:.2}");
+    }
+
+    #[test]
+    fn orientation_sur_le_soleil_de_la_photo() {
+        // Panorama de synthèse (tour de 1 800 px, horizon en ligne 180) : un
+        // soleil à 26,3° y serait en ligne 180 − tan(26,3°) × 1 800 / 2π.
+        let mut r = sans_metadonnees(synthese::panorama(1800, 360, 90));
+        assert!(r.soleil(None, None).unwrap_err().starts_with("date de la photo inconnue"));
+        r.metadonnees.date = Some("2026-10-23T15:59:17+02:00".into());
+        assert!(r.soleil(None, None).unwrap_err().starts_with("lieu de la photo inconnu"));
+        r.metadonnees.latitude = Some(44.06504);
+        r.metadonnees.longitude = Some(0.65041);
+        let (az, h) = r.soleil(None, None).unwrap();
+        assert!((az - 218.098).abs() < 0.002 && (h - 26.261).abs() < 0.002, "{az} {h}");
+        assert!(r.soleil(Some("2026-10-23T15:59:17"), None).unwrap_err().contains("sans décalage"));
+
+        let ligne_soleil = 180.0 - h.to_radians().tan() * 1800.0 / (2.0 * std::f64::consts::PI);
+        r.fixer_ligne_horizon(40.0);
+        r.orienter_sur_soleil(500.0, ligne_soleil, (az, h));
+        assert!((r.geometrie.ligne_horizon - 180.0).abs() < 1e-9, "{}", r.geometrie.ligne_horizon);
+        assert!((r.geometrie.azimut(500.0) - az).abs() < 1e-9);
+        assert_eq!(r.nord_methode, "designation");
     }
 
     #[test]

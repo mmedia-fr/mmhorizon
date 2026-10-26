@@ -16,10 +16,15 @@ panoramique 360°. Pour Windows, Linux et Android. Logiciel libre sous
    portrait ou en paysage, tour complet.
 2. Le charger dans MMhorizon. Le lieu, l'altitude et la date sont lus dans
    les métadonnées de la photo ; on les saisit s'ils manquent.
-3. Toucher, sur le panorama, le point qui est au nord.
-4. Vérifier la limite ciel / obstacles détectée, et la corriger au besoin au
+3. Toucher, sur le panorama, le point qui est au nord — ou le centre du
+   soleil, si la photo le montre : sa position à l'heure et au lieu de la
+   prise de vue donne le nord et la ligne d'horizon.
+4. Si le panorama dépasse le tour (le soleil, ou un autre repère, paraît aux
+   deux bouts), toucher ce repère aux deux bouts : leur écart fait un tour.
+   Chaque geste laisse sur le panorama un repère de la couleur de son bouton.
+5. Vérifier la limite ciel / obstacles détectée, et la corriger au besoin au
    doigt ou à la souris.
-5. Exporter.
+6. Exporter.
 
 L'orientation de la prise de vue et l'objectif utilisé se déduisent de la
 photo : il n'y a rien à régler.
@@ -42,7 +47,9 @@ Exports vers les logiciels courants :
 
 Sur un tour complet, la largeur de l'image vaut 360° : l'échelle s'en déduit
 sans connaître l'objectif. Le seul repère supplémentaire est la ligne
-d'horizon.
+d'horizon. Un panorama de téléphone dépasse souvent le tour ; quand la
+reprise du début n'est pas détectée, un même repère touché aux deux bouts
+donne la largeur du tour — sans elle, azimuts et hauteurs seraient faussés.
 
 Le champ vertical dépend de l'orientation et de l'objectif — environ ±26° en
 paysage avec l'objectif principal, ±34° en portrait, ±45° en paysage avec
@@ -64,6 +71,9 @@ mmhorizon-calcul panorama.jpg --nord 4321 --exports exports --apercu apercu.png
 - `--nord X` : colonne de la photo, en pixels, qui pointe au nord vrai ;
   `--repere X:AZ` pour un repère d'azimut connu ;
 - `--ligne-horizon Y` : ligne de la photo à 0° (par défaut, le milieu) ;
+- `--soleil X:Y` : centre du soleil sur la photo ; le nord et la ligne
+  d'horizon s'en déduisent, d'après la date et le lieu de la prise de vue
+  (EXIF, ou `--date` et `--lat --lon`) ;
 - `--tour A:B` : colonnes d'un même point vu au début et à la fin du
   panorama, quand la photo dépasse le tour sans que le recouvrement soit
   détecté (le soleil qui apparaît deux fois, par exemple) ;

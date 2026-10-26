@@ -59,6 +59,48 @@ jobs:
           path: noyau/target/release/${{ matrix.exe }}
           if-no-files-found: error
 
+  # Le noyau en module WebAssembly, pour une page web (docs/WASM.md). Il doit
+  # produire les mêmes fichiers que l'outil natif, octet pour octet.
+  wasm:
+    name: noyau-wasm
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            wasm
+            noyau
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Outil wasm-bindgen
+        # Même version que la caisse wasm-bindgen de wasm/Cargo.toml.
+        run: cargo install wasm-bindgen-cli --version 0.2.129 --locked
+      - name: Tests de la liaison
+        run: cargo test --manifest-path wasm/Cargo.toml --locked
+      - name: Module WebAssembly
+        run: |
+          cargo build --manifest-path wasm/Cargo.toml --release --locked --target wasm32-unknown-unknown
+          wasm-bindgen --target web --out-dir dist/wasm wasm/target/wasm32-unknown-unknown/release/mmhorizon_wasm.wasm
+      - name: Mêmes fichiers que l'outil en ligne de commande
+        run: |
+          set -euo pipefail
+          cargo build --manifest-path noyau/Cargo.toml --release --locked --bin mmhorizon-calcul
+          outil=noyau/target/release/mmhorizon-calcul
+          "$outil" --synthese "Panorama été.png"
+          "$outil" "Panorama été.png" --nord 0 --nom "Synthèse" --sortie reference.horizon.json --exports reference
+          node wasm/essai/essai.mjs dist/wasm "Panorama été.png" reference.horizon.json reference --nord 0 --nom "Synthèse"
+      - name: Dépôt du module
+        uses: actions/upload-artifact@v4
+        with:
+          name: mmhorizon-noyau-wasm
+          path: dist/wasm
+          if-no-files-found: error
+
   bureau:
     name: ${{ matrix.nom }}
     runs-on: ${{ matrix.os }}

@@ -3,6 +3,7 @@
 _build/
 core/target/
 noyau/target/
+wasm/target/
 dist/
 .qmlls.ini
 

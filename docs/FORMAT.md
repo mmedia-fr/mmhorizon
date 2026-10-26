@@ -73,7 +73,7 @@ l'exemple est tronqué.
 | `releve.photo.sha256` | Empreinte du fichier source, pour retrouver la photo d'origine. |
 | `releve.projection` | `cylindrique` (panorama de téléphone) ou `equirectangulaire` (sphère photo). |
 | `releve.couverture_azimut_deg` | Étendue horizontale du panorama ; 360 pour un tour complet. |
-| `releve.couverture_methode` | Comment le tour a été mesuré : `gpano` (métadonnées), `chevauchement` (la fin du panorama reprend son début) ou `supposee` (la photo est tenue pour un tour exact). Facultatif. |
+| `releve.couverture_methode` | Comment le tour a été mesuré : `gpano` (métadonnées), `chevauchement` (la fin du panorama reprend son début, détecté), `designation` (un même point désigné au début et à la fin du panorama) ou `supposee` (la photo est tenue pour un tour exact). Facultatif. |
 | `releve.orientation` | `portrait`, `paysage` ou `inconnue` — déduite de la photo. |
 | `releve.objectif` | `principal`, `ultra-grand-angle` ou `inconnu`, et focale équivalente 35 mm lue dans l'EXIF. |
 | `releve.nord` | Comment le nord a été fixé — `designation` (désigné sur la photo), `gpano` (cap des métadonnées) ou `non-fixe` (azimuts relatifs, fichier inutilisable pour l'observation) — et la colonne du panorama qui lui correspond. |

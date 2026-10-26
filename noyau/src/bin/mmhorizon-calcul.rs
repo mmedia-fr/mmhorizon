@@ -18,6 +18,9 @@ Repérage :
                         (sans --nord ni --repere, le cap GPano de la photo sert
                         s'il existe ; sinon les azimuts restent relatifs)
   --ligne-horizon Y     ligne de la photo à la hauteur 0° (défaut : milieu)
+  --tour A:B            colonnes d'un même point vu au début (A) et à la fin (B)
+                        du panorama : leur écart est un tour, quand la photo
+                        dépasse le tour sans que le recouvrement soit détecté
 
 Site (si absent de l'EXIF) :
   --nom TEXTE  --lat DEG  --lon DEG  --alt M  --hauteur-objectif M
@@ -36,6 +39,7 @@ struct Options {
     photo: Option<PathBuf>,
     nord: Option<(f64, f64)>,
     ligne_horizon: Option<f64>,
+    tour: Option<(f64, f64)>,
     site: Site,
     sortie: Option<PathBuf>,
     exports: Option<PathBuf>,
@@ -54,6 +58,7 @@ fn lire_options() -> Result<Options, String> {
         photo: None,
         nord: None,
         ligne_horizon: None,
+        tour: None,
         site: Site::default(),
         sortie: None,
         exports: None,
@@ -77,6 +82,11 @@ fn lire_options() -> Result<Options, String> {
                 o.nord = Some((nombre("--repere", Some(x.into()))?, nombre("--repere", Some(az.into()))?));
             }
             "--ligne-horizon" => o.ligne_horizon = Some(nombre(&a, args.next())?),
+            "--tour" => {
+                let v = args.next().ok_or("--tour attend A:B")?;
+                let (x, y) = v.split_once(':').ok_or("--tour attend A:B")?;
+                o.tour = Some((nombre("--tour", Some(x.into()))?, nombre("--tour", Some(y.into()))?));
+            }
             "--nom" => o.site.nom = args.next().ok_or("--nom attend un texte")?,
             "--lat" => o.site.latitude = Some(nombre(&a, args.next())?),
             "--lon" => o.site.longitude = Some(nombre(&a, args.next())?),
@@ -114,6 +124,9 @@ fn executer() -> Result<(), String> {
     let octets = std::fs::read(&photo).map_err(|e| format!("{} : {e}", photo.display()))?;
     let nom = photo.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     let mut r = Releve::depuis_octets(&octets, &nom)?;
+    if let Some((a, b)) = o.tour {
+        r.fixer_tour(a, b)?;
+    }
     if let Some(y) = o.ligne_horizon {
         r.fixer_ligne_horizon(y);
     }

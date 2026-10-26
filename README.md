@@ -64,6 +64,9 @@ mmhorizon-calcul panorama.jpg --nord 4321 --exports exports --apercu apercu.png
 - `--nord X` : colonne de la photo, en pixels, qui pointe au nord vrai ;
   `--repere X:AZ` pour un repère d'azimut connu ;
 - `--ligne-horizon Y` : ligne de la photo à 0° (par défaut, le milieu) ;
+- `--tour A:B` : colonnes d'un même point vu au début et à la fin du
+  panorama, quand la photo dépasse le tour sans que le recouvrement soit
+  détecté (le soleil qui apparaît deux fois, par exemple) ;
 - `--nom`, `--lat`, `--lon`, `--alt` : le site, si l'EXIF ne le donne pas ;
 - `--exports DOSSIER` : AstroMosaic, N.I.N.A. et Stellarium en plus du
   `.horizon.json` ;

@@ -203,6 +203,13 @@ impl Releve {
         self.r.fixer_reference(colonne, azimut);
     }
 
+    /// Largeur d'un tour par un même point vu au début (`a`) et à la fin (`b`)
+    /// du panorama. Exception si l'écart ne peut pas être un tour.
+    #[wasm_bindgen(js_name = fixerTour)]
+    pub fn fixer_tour(&mut self, a: f64, b: f64) -> Result<(), JsError> {
+        self.r.fixer_tour(a, b).map_err(|e| JsError::new(&e))
+    }
+
     /// Ligne de la photo retenue comme horizon (0°).
     #[wasm_bindgen(js_name = fixerHorizon)]
     pub fn fixer_horizon(&mut self, ligne: f64) {
@@ -357,5 +364,15 @@ mod tests {
         let apres: serde_json::Value = serde_json::to_value(infos(&r)).unwrap();
         assert_eq!(apres["nord_methode"], "designation");
         assert_eq!(apres["nord_colonne_px"], 450.0);
+    }
+
+    #[test]
+    fn infos_suivent_le_tour_designe() {
+        let mut r = releve();
+        assert_eq!(serde_json::to_value(infos(&r)).unwrap()["couverture_methode"], "chevauchement");
+        r.fixer_tour(40.0, 1830.0).unwrap();
+        let v = serde_json::to_value(infos(&r)).unwrap();
+        assert_eq!(v["couverture_methode"], "designation");
+        assert_eq!(v["tour_px"], 1790.0);
     }
 }

@@ -72,9 +72,11 @@ impl Releve {
     /// Ouvre une photo (JPEG ou PNG) et détecte la limite ciel / obstacles.
     pub fn depuis_octets(octets: &[u8], nom: &str) -> Result<Self, String> {
         let metadonnees = metadonnees::lire(octets);
+        // Sans copie de l'image décodée : un panorama de 35 Mpx en pèse 106 Mo, ce
+        // qui compte dans un navigateur ou sur un téléphone.
         let image = image::load_from_memory(octets)
             .map_err(|e| format!("photo illisible : {e}"))?
-            .to_rgb8();
+            .into_rgb8();
         let image = redresser(image, metadonnees.orientation_exif);
         let sha256 = Sha256::digest(octets).iter().map(|o| format!("{o:02x}")).collect();
         Self::depuis_image(image, nom, sha256, metadonnees)
@@ -168,6 +170,13 @@ impl Releve {
             .enumerate()
             .map(|(i, &y)| ((i as f64 + 0.5) * self.echelle_x, y))
             .collect()
+    }
+
+    /// Image de travail de la détection, redressée, au plus 3 600 colonnes : une
+    /// interface s'en sert d'aperçu. Un de ses pixels vaut
+    /// `largeur / image_analyse().width()` pixels de la photo.
+    pub fn image_analyse(&self) -> &RgbImage {
+        &self.analyse
     }
 
     /// Hauteurs extrêmes couvertes par l'image (bas, haut), en degrés.
@@ -269,9 +278,12 @@ impl Releve {
 }
 
 /// Applique l'orientation EXIF (les rotations ; les miroirs n'arrivent pas en photo).
-fn redresser(image: RgbImage, orientation: Option<u32>) -> RgbImage {
+fn redresser(mut image: RgbImage, orientation: Option<u32>) -> RgbImage {
     match orientation {
-        Some(3) => imageops::rotate180(&image),
+        Some(3) => {
+            imageops::rotate180_in_place(&mut image);
+            image
+        }
         Some(6) => imageops::rotate90(&image),
         Some(8) => imageops::rotate270(&image),
         _ => image,
@@ -411,6 +423,13 @@ mod tests {
         assert!(r.gpano_ecarte.as_deref().is_some_and(|m| m.starts_with("GPano écarté : 180°")));
         assert!((r.geometrie.largeur_360 - 1800.0).abs() < 10.0, "{}", r.geometrie.largeur_360);
         assert_eq!(r.orientation(), "paysage");
+    }
+
+    #[test]
+    fn redressement_a_180_degres_sur_place() {
+        let image = synthese::panorama(400, 60, 0);
+        assert_eq!(redresser(image.clone(), Some(3)), imageops::rotate180(&image));
+        assert_eq!(redresser(image.clone(), Some(1)), image);
     }
 
     #[test]

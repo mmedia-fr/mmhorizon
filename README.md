@@ -73,9 +73,17 @@ mmhorizon-calcul panorama.jpg --nord 4321 --exports exports --apercu apercu.png
 `mmhorizon-calcul --controle` éprouve toute la chaîne sur un panorama de
 synthèse dont le profil est connu.
 
+## Dans une page web
+
+Le noyau existe aussi en module WebAssembly : une page web fait le relevé dans
+le navigateur, avec le même calcul — mêmes fichiers, octet pour octet. La photo
+ne quitte pas le navigateur. Interface et construction :
+[docs/WASM.md](docs/WASM.md).
+
 ## Construire
 
 - Noyau et outil : `cargo build --release --manifest-path noyau/Cargo.toml`.
+- Module WebAssembly : voir [docs/WASM.md](docs/WASM.md).
 - Application : Qt 6.4 ou plus récent, Rust stable, CMake ;
   `cmake -S . -B _build -DCMAKE_BUILD_TYPE=Release && cmake --build _build`.
   L'intégration continue (`.github/workflows/socle.yml`) construit et éprouve

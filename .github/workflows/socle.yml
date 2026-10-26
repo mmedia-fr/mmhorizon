@@ -94,6 +94,9 @@ jobs:
           "$outil" --synthese "Panorama été.png"
           "$outil" "Panorama été.png" --nord 0 --nom "Synthèse" --sortie reference.horizon.json --exports reference
           node wasm/essai/essai.mjs dist/wasm "Panorama été.png" reference.horizon.json reference --nord 0 --nom "Synthèse"
+          # Tour désigné par un même point aux deux bouts.
+          "$outil" "Panorama été.png" --tour 45:1845 --nord 0 --nom "Synthèse" --sortie tour.horizon.json --exports tour
+          node wasm/essai/essai.mjs dist/wasm "Panorama été.png" tour.horizon.json tour --tour 45:1845 --nord 0 --nom "Synthèse"
       - name: Dépôt du module
         uses: actions/upload-artifact@v4
         with:

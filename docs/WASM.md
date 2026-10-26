@@ -60,6 +60,7 @@ arrivent en exceptions `Error`, avec un message en français.
 | `infos()` | état du relevé et métadonnées de la photo, en JSON (ci-dessous) |
 | `fixerNord(colonne)` | désigne la colonne qui pointe au nord |
 | `fixerReference(colonne, azimut)` | azimut vrai connu d'une colonne : un repère, le soleil |
+| `fixerTour(a, b)` | largeur d'un tour : un même point vu au début (colonne `a`) et à la fin (`b`) du panorama, quand la photo dépasse le tour sans que le recouvrement ait été détecté ; exception si l'écart sort de [largeur / 2 ; largeur] |
 | `fixerHorizon(ligne)` | ligne de l'horizon |
 | `retoucher(x0, x1, ligne)` | pose la limite à `ligne` entre les colonnes `x0` et `x1` |
 | `limite()` | `Float64Array` `[x0, y0, x1, y1, …]`, un point par colonne d'aperçu |
@@ -76,7 +77,8 @@ manque est lu dans l'EXIF de la photo ; le nom par défaut est celui de la photo
 sans extension — comme `mmhorizon-calcul --nom --lat --lon --alt`. Un champ
 inconnu est refusé.
 
-`infos()`, sur le panorama réel qui a servi d'épreuve, nord et horizon fixés :
+`infos()`, sur le panorama réel qui a servi d'épreuve — il fait 435°, le soleil
+y paraît deux fois et son tour a été désigné ainsi —, nord et horizon fixés :
 
 ```json
 {
@@ -84,15 +86,15 @@ inconnu est refusé.
   "hauteur": 2800,
   "projection": "cylindrique",
   "couverture_deg": 360,
-  "couverture_methode": "supposee",
-  "tour_px": 12672,
-  "ligne_horizon_px": 1429,
+  "couverture_methode": "designation",
+  "tour_px": 10467,
+  "ligne_horizon_px": 1254,
   "nord_methode": "designation",
-  "nord_colonne_px": 6708,
-  "champ_vertical_deg": [-34.20731341958081, 35.31925694289195],
+  "nord_colonne_px": 5836,
+  "champ_vertical_deg": [-42.86257761734126, 36.9708851431029],
   "orientation": "paysage",
   "objectif": "ultra-grand-angle",
-  "au_dela_du_champ": 3,
+  "au_dela_du_champ": 4,
   "gpano_ecarte": "GPano écarté : 172° annoncés donnent un champ vertical de 37°, quand l'objectif (13 mm éq.) couvre 90° en paysage et 106° en portrait",
   "photo": {
     "latitude": 44.06504199972222,
@@ -104,7 +106,9 @@ inconnu est refusé.
 }
 ```
 
-`nord_methode` vaut `designation`, `gpano` ou `non-fixe` ; `au_dela_du_champ`
+`couverture_methode` vaut `gpano`, `chevauchement`, `designation` ou
+`supposee` ([FORMAT.md](FORMAT.md)) ; `nord_methode` vaut `designation`, `gpano`
+ou `non-fixe` ; `au_dela_du_champ`
 compte les degrés d'azimut où l'obstacle dépasse le haut de l'image ;
 `gpano_ecarte` est `null` quand le GPano de la photo a été retenu ou qu'il n'y
 en a pas.

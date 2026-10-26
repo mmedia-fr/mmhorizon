@@ -3,7 +3,7 @@
 // octet pour octet les fichiers de mmhorizon-calcul.
 //
 //   node wasm/essai/essai.mjs MODULE PHOTO REFERENCE.horizon.json DOSSIER_EXPORTS \
-//        [--nord X] [--ligne-horizon Y] [--nom TEXTE]
+//        [--tour A:B] [--nord X] [--ligne-horizon Y] [--nom TEXTE]
 //
 // MODULE : dossier écrit par `wasm-bindgen --target web` ; la référence et le
 // dossier d'exports viennent de `mmhorizon-calcul PHOTO … --sortie … --exports …`
@@ -16,7 +16,7 @@ import { pathToFileURL } from "node:url";
 
 const [module, photo, reference, dossier, ...reste] = process.argv.slice(2);
 if (!dossier) {
-  console.error("usage : essai.mjs MODULE PHOTO REFERENCE.horizon.json DOSSIER_EXPORTS [--nord X] [--ligne-horizon Y] [--nom TEXTE]");
+  console.error("usage : essai.mjs MODULE PHOTO REFERENCE.horizon.json DOSSIER_EXPORTS [--tour A:B] [--nord X] [--ligne-horizon Y] [--nom TEXTE]");
   process.exit(2);
 }
 const options = {};
@@ -29,6 +29,7 @@ console.log(`noyau ${mm.version()} : ${mm.controle()}`);
 const debut = performance.now();
 const r = new mm.Releve(readFileSync(photo), basename(photo));
 const duree = performance.now() - debut;
+if (options["--tour"] !== undefined) r.fixerTour(...options["--tour"].split(":").map(Number));
 if (options["--ligne-horizon"] !== undefined) r.fixerHorizon(Number(options["--ligne-horizon"]));
 assert.equal(r.nord, undefined);
 if (options["--nord"] !== undefined) r.fixerNord(Number(options["--nord"]));
@@ -55,6 +56,9 @@ assert.ok(Math.abs(r.hauteurDeLigne(r.ligneDeHauteur(10)) - 10) < 1e-9, "ligne �
 // Les erreurs arrivent en exceptions JavaScript.
 assert.throws(() => new mm.Releve(new Uint8Array([1, 2, 3]), "rien.jpg"), /photo illisible/);
 assert.throws(() => r.exporter("hrz"), /export inconnu/);
+const tour = r.tour;
+assert.throws(() => r.fixerTour(0, 1), /^Error: tour de 1 px/);
+assert.equal(r.tour, tour);
 assert.throws(() => r.fichierHorizon('{"lat": 44}'), /unknown field `lat`/);
 
 const mo = (sortie.memory.buffer.byteLength / 2 ** 20).toFixed(0);

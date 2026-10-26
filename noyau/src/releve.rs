@@ -35,6 +35,8 @@ pub enum Couverture {
     GPano,
     /// Recouvrement détecté entre la fin et le début du panorama.
     Chevauchement,
+    /// Un même point désigné aux deux bouts du panorama.
+    Designation,
     /// Faute de mieux, la photo est tenue pour un tour exact.
     Supposee,
 }
@@ -44,6 +46,7 @@ impl Couverture {
         match self {
             Self::GPano => "gpano",
             Self::Chevauchement => "chevauchement",
+            Self::Designation => "designation",
             Self::Supposee => "supposee",
         }
     }
@@ -145,6 +148,26 @@ impl Releve {
     /// Colonne de la photo qui pointe au nord, si le nord est fixé.
     pub fn colonne_nord(&self) -> Option<f64> {
         self.nord_fixe().then(|| self.geometrie.colonne(0.0))
+    }
+
+    /// Fixe la largeur d'un tour par un même point vu aux deux bouts du
+    /// panorama, aux colonnes `a` et `b` : quand la photo dépasse le tour sans que
+    /// le recouvrement ait été détecté. La largeur règle l'échelle des azimuts et
+    /// des hauteurs ; le nord et la ligne d'horizon restent sur leurs colonne et
+    /// ligne, et sont à redésigner s'ils en dépendaient (orientation sur le soleil).
+    pub fn fixer_tour(&mut self, a: f64, b: f64) -> Result<(), String> {
+        let tour = (b - a).abs();
+        let largeur = self.largeur as f64;
+        if !(largeur / 2.0..=largeur).contains(&tour) {
+            return Err(format!(
+                "tour de {tour:.0} px : il faut désigner un même point au début et à la fin du \
+                 panorama, soit un écart de {:.0} à {largeur:.0} px",
+                largeur / 2.0
+            ));
+        }
+        self.geometrie.largeur_360 = tour;
+        self.couverture = Couverture::Designation;
+        Ok(())
     }
 
     /// Ligne de la photo retenue comme horizon (hauteur 0°).
@@ -430,6 +453,44 @@ mod tests {
         let image = synthese::panorama(400, 60, 0);
         assert_eq!(redresser(image.clone(), Some(3)), imageops::rotate180(&image));
         assert_eq!(redresser(image.clone(), Some(1)), image);
+    }
+
+    fn sans_metadonnees(image: RgbImage) -> Releve {
+        Releve::depuis_image(image, "essai.png", String::new(), Metadonnees::default()).unwrap()
+    }
+
+    #[test]
+    fn tour_designe_quand_le_recouvrement_echappe() {
+        // Recouvrement de 600 px manqué : la photo est tenue pour un tour de
+        // 2 400 px, azimuts et hauteurs s'en trouvent comprimés. Un même point
+        // désigné aux deux bouts rend le tour vrai.
+        let mut r = sans_metadonnees(synthese::panorama(1800, 360, 600));
+        r.geometrie.largeur_360 = 2400.0;
+        r.couverture = Couverture::Supposee;
+        r.fixer_nord(0.0);
+        let site = || crate::Site { nom: "essai".into(), ..Default::default() };
+        let faux = crate::controle::ecarts(&crate::FichierHorizon::depuis_releve(&r, site()));
+        assert!(faux.is_err() || faux.unwrap().0 > 1.0);
+
+        r.fixer_tour(2050.0, 250.0).unwrap();
+        assert_eq!(r.couverture, Couverture::Designation);
+        assert_eq!(r.geometrie.largeur_360, 1800.0);
+        assert_eq!(r.colonne_nord(), Some(0.0));
+        let f = crate::FichierHorizon::depuis_releve(&r, site());
+        assert_eq!(f.releve.couverture_methode.as_deref(), Some("designation"));
+        let (moyen, p95) = crate::controle::ecarts(&f).unwrap();
+        assert!(moyen < 0.3 && p95 < 0.8, "moyen {moyen:.2}, 95 % {p95:.2}");
+    }
+
+    #[test]
+    fn tour_impossible_refuse_sans_rien_changer() {
+        let mut r = sans_metadonnees(synthese::panorama(1800, 360, 90));
+        let (geo, couverture) = (r.geometrie.clone(), r.couverture);
+        let e = r.fixer_tour(0.0, 1900.0).unwrap_err();
+        assert!(e.starts_with("tour de 1900 px : il faut désigner un même point"), "{e}");
+        assert!(r.fixer_tour(100.0, 900.0).is_err());
+        assert_eq!(r.geometrie, geo);
+        assert_eq!(r.couverture, couverture);
     }
 
     #[test]

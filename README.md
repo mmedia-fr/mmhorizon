@@ -16,12 +16,14 @@ panoramique 360°. Pour Windows, Linux et Android. Logiciel libre sous
    portrait ou en paysage, tour complet.
 2. Le charger dans MMhorizon. Le lieu, l'altitude et la date sont lus dans
    les métadonnées de la photo ; on les saisit s'ils manquent.
-3. Toucher, sur le panorama, le point qui est au nord — ou le centre du
-   soleil, si la photo le montre : sa position à l'heure et au lieu de la
-   prise de vue donne le nord et la ligne d'horizon.
-4. Si le panorama dépasse le tour (le soleil, ou un autre repère, paraît aux
+3. Si le panorama dépasse le tour (le soleil, ou un autre repère, paraît aux
    deux bouts), toucher ce repère aux deux bouts : leur écart fait un tour.
-   Chaque geste laisse sur le panorama un repère de la couleur de son bouton.
+4. Toucher le centre du soleil, si la photo le montre : sa position à
+   l'heure et au lieu de la prise de vue donne le nord et la ligne
+   d'horizon. Sinon, toucher le point qui est au nord, puis la ligne
+   d'horizon. Chaque geste laisse sur le panorama un repère de la couleur
+   de son bouton ; les boutons suivent cet ordre : Tour, Soleil, Nord,
+   Horizon.
 5. Vérifier la limite ciel / obstacles détectée, et la corriger au besoin au
    doigt ou à la souris.
 6. Exporter.

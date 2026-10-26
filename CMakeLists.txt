@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # MMhorizon — noyau de calcul Rust (noyau/), liaison Qt (core/), interface Qt 6 / QML.
 cmake_minimum_required(VERSION 3.24)
-project(mmhorizon VERSION 0.1.2 LANGUAGES CXX)
+project(mmhorizon VERSION 0.1.3 LANGUAGES CXX)
 
 if(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
   set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreadedDLL")

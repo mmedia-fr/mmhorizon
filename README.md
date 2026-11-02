@@ -102,7 +102,12 @@ ne quitte pas le navigateur. Interface et construction :
 - Application : Qt 6.4 ou plus récent, Rust stable, CMake ;
   `cmake -S . -B _build -DCMAKE_BUILD_TYPE=Release && cmake --build _build`.
   L'intégration continue (`.github/workflows/socle.yml`) construit et éprouve
-  Windows, Linux (AppImage), macOS et Android.
+  Windows, Linux (AppImage) et Android.
+- Ni macOS ni iOS : les systèmes d'Apple ne sont pas des cibles de MMhorizon,
+  et l'intégration continue n'en construit plus depuis le 02/11/2026 :
+  la distribution par l'App Store est incompatible avec la licence GPL, et
+  une distribution hors de l'App Store passe par une démarche lourde et payante
+  (signature et notarisation par un compte de développeur Apple).
 
 ## Licence
 

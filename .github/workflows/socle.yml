@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# MMhorizon (Rust / Qt 6) — fabrication continue : Windows, Linux, Android, et macOS
-# par portabilité. Structure reprise de MMdedit (même socle).
+# MMhorizon (Rust / Qt 6) — fabrication continue : Windows, Linux, Android.
+# Structure reprise de MMdedit (même socle).
 #
 # Le noyau de calcul s'éprouve seul (tests, outil en ligne de commande, contrôle
 # sur panorama de synthèse) ; l'application s'éprouve sur le paquet, et non sur le
@@ -27,7 +27,6 @@ jobs:
         include:
           - { nom: linux-x86_64,   os: ubuntu-22.04, exe: mmhorizon-calcul }
           - { nom: windows-x86_64, os: windows-2022, exe: mmhorizon-calcul.exe }
-          - { nom: macos-arm64,    os: macos-14,     exe: mmhorizon-calcul }
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -115,7 +114,6 @@ jobs:
           # de sa fabrication : ubuntu-22.04 (glibc 2.35) couvre Debian 12 (MMdedit 0.4.2).
           - { nom: linux,   os: ubuntu-22.04 }
           - { nom: windows, os: windows-2022 }
-          - { nom: macos,   os: macos-14 }
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -254,32 +252,6 @@ jobs:
         with:
           name: mmhorizon-linux-appimage
           path: dist/*.AppImage
-          if-no-files-found: error
-
-      # ---- macOS : bundle et image disque (non notarisée) -------------------
-      - name: Paquet macOS
-        if: runner.os == 'macOS'
-        shell: bash
-        run: |
-          set -euo pipefail
-          version=$(sed -n 's/^project(mmhorizon VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt)
-          mkdir -p dist
-          cp -R _build/mmhorizon.app dist/MMhorizon.app
-          "$QT_ROOT_DIR/bin/macdeployqt" dist/MMhorizon.app -qmldir=core/qml
-          codesign --force --deep --sign - dist/MMhorizon.app
-          hdiutil create -volname "MMhorizon $version" -srcfolder dist/MMhorizon.app \
-            -ov -format UDZO "dist/MMhorizon-$version.dmg"
-          test -f "dist/MMhorizon-$version.dmg"
-      - name: Contrôle du paquet macOS
-        if: runner.os == 'macOS'
-        shell: bash
-        run: QT_QPA_PLATFORM=offscreen ./dist/MMhorizon.app/Contents/MacOS/mmhorizon --smoke "Panorama été.png"
-      - name: Dépôt de l'image disque macOS
-        if: runner.os == 'macOS'
-        uses: actions/upload-artifact@v4
-        with:
-          name: mmhorizon-macos-dmg
-          path: dist/*.dmg
           if-no-files-found: error
 
   android:

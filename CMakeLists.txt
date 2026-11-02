@@ -3,6 +3,11 @@
 cmake_minimum_required(VERSION 3.24)
 project(mmhorizon VERSION 0.1.3 LANGUAGES CXX)
 
+# Ni macOS ni iOS (décision du 2026-11-02, motif au README).
+if(APPLE)
+  message(FATAL_ERROR "MMhorizon ne se construit pas pour les systèmes d'Apple (cf. README).")
+endif()
+
 if(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
   set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreadedDLL")
 endif()
@@ -77,11 +82,6 @@ target_compile_definitions(mmhorizon PRIVATE MMHORIZON_VERSION="${PROJECT_VERSIO
 
 set_target_properties(mmhorizon PROPERTIES
   WIN32_EXECUTABLE ON
-  MACOSX_BUNDLE ON
-  MACOSX_BUNDLE_GUI_IDENTIFIER fr.mmedia.mmhorizon
-  MACOSX_BUNDLE_BUNDLE_NAME MMhorizon
-  MACOSX_BUNDLE_BUNDLE_VERSION ${PROJECT_VERSION}
-  MACOSX_BUNDLE_SHORT_VERSION_STRING ${PROJECT_VERSION}
   QT_ANDROID_PACKAGE_NAME fr.mmedia.mmhorizon
   QT_ANDROID_APP_NAME MMhorizon
   QT_ANDROID_VERSION_NAME ${PROJECT_VERSION})
